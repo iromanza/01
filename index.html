@@ -1,41 +1,33 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MQTT Test with HiveMQ Cloud</title>
+  <title>MQTT HiveMQ Debug</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://unpkg.com/paho-mqtt/mqttws31.min.js"></script>
 </head>
 <body>
-  <h2>MQTT Test → HiveMQ Cloud</h2>
+  <h2>MQTT HiveMQ Debug</h2>
   <div id="status">Connecting...</div>
   <div id="log"></div>
 
   <script>
-    // ==== HiveMQ Cloud Config ====
-    const brokerHost = "1e1e9581694f459bba546a40c75d5445.s1.eu.hivemq.cloud:8884/mqtt"; // 👉 ใส่ host ของคุณ
-    const brokerPort = 8884;                        // ใช้ WebSocket Secure (WSS)
-    const topic = "tm/test";                        // topic ที่จะส่งข้อความ
-    const mqttUser = "Tinyyy";               // 👉 ใส่ username ของคุณ
-    const mqttPass = "Tiny0330";               // 👉 ใส่ password ของคุณ
+    // ==== HiveMQ Config (ต้องแก้เป็นค่าของคุณ) ====
+    const brokerHost = "1e1e9581694f459bba546a40c75d5445.s1.eu.hivemq.cloud"; // ใส่ host จาก HiveMQ Cloud
+    const brokerPort = 8884;                        // ใช้ WSS
+    const topic = "tm/test";
+    const mqttUser = "Tinyyy";
+    const mqttPass = "Tiny0330";
 
-    let client;
+    let client = new Paho.MQTT.Client(brokerHost, brokerPort, "clientId-" + Math.random());
 
-    // สร้าง MQTT Client
-    client = new Paho.MQTT.Client(brokerHost, brokerPort, "clientId-" + Math.random());
-
-    // Callback เมื่อ disconnect
-    client.onConnectionLost = function(responseObject) {
-      if (responseObject.errorCode !== 0) {
-        log("❌ Connection lost: " + responseObject.errorMessage);
-      }
+    client.onConnectionLost = function (responseObject) {
+      log("❌ Connection lost: " + responseObject.errorMessage);
     };
 
-    // Callback เมื่อมีข้อความเข้า
-    client.onMessageArrived = function(message) {
-      log("📥 Received on " + message.destinationName + ": " + message.payloadString);
+    client.onMessageArrived = function (message) {
+      log("📥 Received: " + message.payloadString);
     };
 
-    // Connect ไปยัง HiveMQ Cloud
     client.connect({
       useSSL: true,
       userName: mqttUser,
@@ -43,31 +35,28 @@
       onSuccess: () => {
         log("✅ Connected to HiveMQ Cloud");
         document.getElementById("status").innerText = "Connected ✅";
-
-        // Subscribe เพื่อรับข้อความจาก topic เดียวกัน
         client.subscribe(topic);
-        log("📡 Subscribed to topic: " + topic);
+        log("📡 Subscribed to " + topic);
 
-        // ส่งข้อความ dummy ทุกๆ 3 วินาที
+        // ส่งข้อความทุก 5 วิ
         setInterval(() => {
           if (client.isConnected()) {
-            const msg = new Paho.MQTT.Message("Hello MQTT! " + new Date().toLocaleTimeString());
+            let msg = new Paho.MQTT.Message("Hello MQTT @ " + new Date().toLocaleTimeString());
             msg.destinationName = topic;
             client.send(msg);
-            log("📤 Sent message to " + topic);
+            log("📤 Sent: " + msg.payloadString);
           }
-        }, 3000);
+        }, 5000);
       },
-      onFailure: (e) => {
-        log("❌ Failed to connect: " + e.errorMessage);
+      onFailure: (err) => {
+        log("❌ Connect failed: " + JSON.stringify(err));
         document.getElementById("status").innerText = "Connect Failed ❌";
       }
     });
 
-    function log(message) {
-      console.log(message);
-      const logDiv = document.getElementById("log");
-      logDiv.innerHTML = message + "<br>" + logDiv.innerHTML;
+    function log(msg) {
+      console.log(msg);
+      document.getElementById("log").innerHTML = msg + "<br>" + document.getElementById("log").innerHTML;
     }
   </script>
 </body>
