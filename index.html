@@ -12,6 +12,9 @@
     video { max-width: 100%; height: auto; }
     #label-container { margin: 10px; font-size: 1.2em; }
     button { padding: 10px 20px; font-size: 1em; margin: 5px; }
+    #mqtt-status { margin: 10px; font-weight: bold; }
+    .connected { color: green; }
+    .disconnected { color: red; }
   </style>
 </head>
 <body>
@@ -19,6 +22,7 @@
   <button onclick="init('environment')">Start (Back Camera)</button>
   <button onclick="init('user')">Start (Front Camera)</button>
   <button onclick="stop()">Stop</button>
+  <div id="mqtt-status" class="disconnected">MQTT: Disconnected</div>
   <div id="webcam-container"></div>
   <div id="label-container"></div>
 
@@ -26,36 +30,18 @@
     const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
     let model, webcam, labelContainer, maxPredictions;
 
-// MQTT Config
-const MQTT_BROKER = "wss://your-mqtt-broker.com:8884"; // เปลี่ยนเป็น broker ของคุณ
-const MQTT_TOPIC = "8nv/somsom"; // ชื่อ topic ใหม่
-let mqttClient;
+    // MQTT Config
+    const MQTT_BROKER = "wss://broker.hivemq.cloud:8884/mqtt"; // เปลี่ยนเป็น broker ของคุณ
+    const MQTT_TOPIC = "somsom"; // topic ชื่อใหม่
+    let mqttClient;
 
-// ...
-
-async function predict() {
-  const prediction = await model.predict(webcam.canvas);
-
-  for (let i = 0; i < maxPredictions; i++) {
-    const className = prediction[i].className;
-    const probability = prediction[i].probability.toFixed(2);
-    labelContainer.childNodes[i].innerHTML = `${className}: ${probability}`;
-
-    // ส่งไป MQTT ทุก class ใน topic เดียว
-    if (mqttClient && mqttClient.connected) {
-      const payload = JSON.stringify({ class: className, probability, timestamp: Date.now() });
-      mqttClient.publish(MQTT_TOPIC, payload);
-    }
-  }
-}
     async function init(facingMode) {
-      // โหลดโมเดล
       const modelURL = URL + "model.json";
       const metadataURL = URL + "metadata.json";
       model = await tmImage.load(modelURL, metadataURL);
       maxPredictions = model.getTotalClasses();
 
-      // ตั้งค่า Webcam
+      // Webcam setup
       webcam = new tmImage.Webcam(224, 224, false);
       try {
         await webcam.setup({ facingMode: facingMode });
@@ -68,20 +54,34 @@ async function predict() {
       }
       document.getElementById("webcam-container").appendChild(webcam.canvas);
 
-      // สร้าง label container
+      // Label container
       labelContainer = document.getElementById("label-container");
       labelContainer.innerHTML = "";
       for (let i = 0; i < maxPredictions; i++) {
         labelContainer.appendChild(document.createElement("div"));
       }
 
-      // เชื่อม MQTT
-      mqttClient = mqtt.connect(MQTT_BROKER);
-      mqttClient.on('connect', () => {
-        console.log("Connected to MQTT Broker!");
+      // MQTT connect
+      mqttClient = mqtt.connect(MQTT_BROKER, {
+        reconnectPeriod: 1000,
+        connectTimeout: 4000,
       });
+
+      mqttClient.on('connect', () => {
+        console.log("Connected to MQTT Broker on port 8884!");
+        document.getElementById("mqtt-status").innerText = "MQTT: Connected";
+        document.getElementById("mqtt-status").className = "connected";
+      });
+
       mqttClient.on('error', (err) => {
         console.error("MQTT Error:", err);
+        document.getElementById("mqtt-status").innerText = "MQTT: Error";
+        document.getElementById("mqtt-status").className = "disconnected";
+      });
+
+      mqttClient.on('close', () => {
+        document.getElementById("mqtt-status").innerText = "MQTT: Disconnected";
+        document.getElementById("mqtt-status").className = "disconnected";
       });
     }
 
@@ -94,16 +94,19 @@ async function predict() {
     async function predict() {
       const prediction = await model.predict(webcam.canvas);
 
+      // รวมผลลัพธ์ทุก class เป็น JSON เดียว
+      const payload = {};
       for (let i = 0; i < maxPredictions; i++) {
         const className = prediction[i].className;
         const probability = prediction[i].probability.toFixed(2);
         labelContainer.childNodes[i].innerHTML = `${className}: ${probability}`;
+        payload[className] = probability;
+      }
+      payload.timestamp = Date.now();
 
-        // ส่งไป MQTT แบบ JSON
-        if (mqttClient && mqttClient.connected) {
-          const payload = JSON.stringify({ class: className, probability: probability, timestamp: Date.now() });
-          mqttClient.publish(`${MQTT_TOPIC_PREFIX}${className}`, payload);
-        }
+      // ส่ง payload ไป MQTT topic เดียว
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(MQTT_TOPIC, JSON.stringify(payload));
       }
     }
 
@@ -115,9 +118,10 @@ async function predict() {
       }
       if (mqttClient) {
         mqttClient.end();
+        document.getElementById("mqtt-status").innerText = "MQTT: Disconnected";
+        document.getElementById("mqtt-status").className = "disconnected";
       }
     }
   </script>
 </body>
 </html>
-
