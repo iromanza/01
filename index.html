@@ -1,62 +1,48 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Teachable Machine Image Model (Mobile + MQTT)</title>
+  <title>Teachable Machine + MQTT</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
-  <script src="https://unpkg.com/paho-mqtt/mqttws31.min.js"></script> <!-- MQTT -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; }
-    #webcam-container { max-width: 100%; margin: 10px auto; }
+    body { font-family: Arial; text-align: center; margin:0; padding:0; }
     video { max-width: 100%; height: auto; }
     #label-container { margin: 10px; font-size: 1.2em; }
-    button { padding: 10px 20px; font-size: 1em; margin: 5px; }
+    button { padding: 10px 20px; margin: 5px; font-size: 1em; }
   </style>
 </head>
 <body>
-  <div>Teachable Machine Image Model + MQTT</div>
-  <button type="button" onclick="init('environment')">Start (Back Camera)</button>
-  <button type="button" onclick="init('user')">Start (Front Camera)</button>
-  <button type="button" onclick="stop()">Stop</button>
+  <h2>Teachable Machine + MQTT</h2>
+  <button onclick="init('environment')">Start (Back Camera)</button>
+  <button onclick="init('user')">Start (Front Camera)</button>
+  <button onclick="stop()">Stop</button>
   <div id="webcam-container"></div>
   <div id="label-container"></div>
 
-  <script type="text/javascript">
+  <script>
     const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
+    const MQTT_HOST = "wss://1e1e9581694f459bba546a40c75d5445.s1.eu.hivemq.cloud:8884/mqtt"; // เปลี่ยนเป็น HiveMQ Host ของคุณ
+    const MQTT_USERNAME = "Tinyyy"; // ใส่ username
+    const MQTT_PASSWORD = "Tiny0330"; // ใส่ password
+    const MQTT_TOPIC = "Tinyy";
 
-    let model, webcam, labelContainer, maxPredictions;
-
-    // ==== MQTT CONFIG ====
-    const brokerHost = "1e1e9581694f459bba546a40c75d5445.s1.eu.hivemq.cloud"; // เปลี่ยนเป็น broker ของคุณ
-    const brokerPort = 8084;             // port WebSocket Secure (หรือ 8083 ถ้า non-SSL)
-    const topic = "tm/predict";          // หัวข้อที่จะส่งค่า
-    let client;
-
-    // สร้าง MQTT Client
-    function connectMQTT() {
-      client = new Paho.MQTT.Client(brokerHost, brokerPort, "clientId-" + Math.random());
-      client.connect({
-        useSSL: true,
-        onSuccess: () => console.log("MQTT connected"),
-        onFailure: (e) => console.error("MQTT failed:", e)
-      });
-    }
-    connectMQTT();
+    let model, webcam, labelContainer, maxPredictions, mqttClient;
 
     async function init(facingMode) {
+      // โหลด model
       const modelURL = URL + "model.json";
       const metadataURL = URL + "metadata.json";
-
       model = await tmImage.load(modelURL, metadataURL);
       maxPredictions = model.getTotalClasses();
 
+      // setup webcam
       webcam = new tmImage.Webcam(224, 224, false);
       try {
         await webcam.setup({ facingMode: facingMode });
         await webcam.play();
-        if (!webcam.canvas) throw new Error("Webcam canvas is not initialized");
-        console.log("Webcam initialized, facingMode:", facingMode);
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
         window.requestAnimationFrame(loop);
       } catch (e) {
         console.error("Webcam setup failed:", e);
@@ -64,12 +50,29 @@
         return;
       }
 
-      document.getElementById("webcam-container").appendChild(webcam.canvas);
+      // แสดง label
       labelContainer = document.getElementById("label-container");
       labelContainer.innerHTML = "";
       for (let i = 0; i < maxPredictions; i++) {
         labelContainer.appendChild(document.createElement("div"));
       }
+
+      // setup MQTT client
+      mqttClient = mqtt.connect(MQTT_HOST, {
+        username: MQTT_USERNAME,
+        password: MQTT_PASSWORD,
+        keepalive: 30,
+        reconnectPeriod: 1000,
+        protocolVersion: 4
+      });
+
+      mqttClient.on('connect', () => {
+        console.log("MQTT connected!");
+      });
+
+      mqttClient.on('error', (err) => {
+        console.error("MQTT error:", err);
+      });
     }
 
     async function loop() {
@@ -80,34 +83,29 @@
 
     async function predict() {
       const prediction = await model.predict(webcam.canvas);
-      let payload = {};
-
+      let bestPrediction = { className: "", probability: 0 };
+      
       for (let i = 0; i < maxPredictions; i++) {
-        const classPrediction = prediction[i].className + ": " + prediction[i].probability.toFixed(2);
-        labelContainer.childNodes[i].innerHTML = classPrediction;
-
-        payload[prediction[i].className] = prediction[i].probability.toFixed(2);
+        const p = prediction[i];
+        labelContainer.childNodes[i].innerHTML = `${p.className}: ${p.probability.toFixed(2)}`;
+        if (p.probability > bestPrediction.probability) bestPrediction = p;
       }
 
-      // ส่งค่าไปที่ MQTT (JSON format)
-      if (client && client.isConnected()) {
-        const msg = new Paho.MQTT.Message(JSON.stringify(payload));
-        msg.destinationName = topic;
-        client.send(msg);
-        console.log("MQTT sent:", payload);
+      // ส่งไป MQTT
+      if (mqttClient && mqttClient.connected) {
+        const payload = JSON.stringify({
+          className: bestPrediction.className,
+          probability: bestPrediction.probability
+        });
+        mqttClient.publish(MQTT_TOPIC, payload);
       }
     }
 
     function stop() {
-      if (webcam) {
-        webcam.stop();
-        document.getElementById("webcam-container").innerHTML = '';
-        document.getElementById("label-container").innerHTML = '';
-      }
-      if (client && client.isConnected()) {
-        client.disconnect();
-        console.log("MQTT disconnected");
-      }
+      if (webcam) webcam.stop();
+      document.getElementById("webcam-container").innerHTML = '';
+      document.getElementById("label-container").innerHTML = '';
+      if (mqttClient) mqttClient.end();
     }
   </script>
 </body>
