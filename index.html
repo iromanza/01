@@ -21,7 +21,7 @@
   </style>
 </head>
 <body>
-  <h2>Teachable Machine Image Model (Mobile) + MQTT</h2>
+  <h2>Teachable Machine + MQTT (Port 8884)</h2>
 
   <!-- MQTT UI -->
   <div class="mqtt-form">
@@ -54,12 +54,21 @@
       topic = document.getElementById("topic-input").value;
       if (!broker || !topic) { alert("Please enter Broker URL and Topic"); return; }
 
-      client = mqtt.connect(broker, { reconnectPeriod: 1000, connectTimeout: 30*1000 });
+      // สุ่ม clientId ทุกครั้ง
+      const clientId = "tm_client_" + Math.random().toString(16).substr(2, 8);
+
+      client = mqtt.connect(broker, {
+        clientId: clientId,
+        clean: true,
+        connectTimeout: 4000,
+        reconnectPeriod: 1000,
+        protocolVersion: 4
+      });
 
       client.on('connect', () => {
         mqttStatus.innerText = "MQTT: Connected";
         mqttStatus.className = "connected";
-        console.log("MQTT connected");
+        console.log("MQTT connected with clientId:", clientId);
       });
 
       client.on('reconnect', () => {
@@ -73,7 +82,7 @@
       });
 
       client.on('error', (err) => {
-        mqttStatus.innerText = "MQTT: Error";
+        mqttStatus.innerText = "MQTT: Error (see console)";
         mqttStatus.className = "disconnected";
         console.error("MQTT error:", err);
       });
