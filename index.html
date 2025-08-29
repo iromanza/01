@@ -118,16 +118,18 @@ async function loop(){
     document.getElementById("label-container").innerText =
       maxClass.className + ": " + maxClass.probability.toFixed(2);
 
-    // ส่ง MQTT
+    // ส่ง MQTT เฉพาะ class สูงสุด
     if(client && client.connected){
       mqttStatus.innerText="MQTT: Sending..."; 
       mqttStatus.className="sending";
+
       const payload = {};
       payload[maxClass.className] = maxClass.probability.toFixed(2);
+
       client.publish(topic, JSON.stringify(payload), {}, ()=>{
         mqttStatus.innerText="MQTT: Connected"; 
         mqttStatus.className="connected";
-        logDebug("Sent MQTT: "+JSON.stringify(payload));
+        logDebug("Sent MQTT (only max class): "+JSON.stringify(payload));
       });
     }
   } else {
