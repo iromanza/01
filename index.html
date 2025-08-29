@@ -1,106 +1,78 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MQTT Test Page</title>
+  <title>MQTT HiveMQ WebSocket Test</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
     input, button { padding: 5px; margin: 5px; font-size: 1em; width: 250px; }
     #status { margin: 10px; font-weight: bold; }
-    #messages { margin-top: 10px; text-align: left; max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+    #log { margin-top: 10px; text-align: left; max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
   </style>
 </head>
 <body>
-  <h2>MQTT Test Page</h2>
+  <h2>MQTT HiveMQ WebSocket Test</h2>
 
-  <input type="text" id="broker-input" placeholder="Broker URL (e.g. wss://broker.hivemq.com:8000/mqtt)">
   <input type="text" id="topic-input" placeholder="Topic (e.g. test/topic)">
-  <button onclick="connectMQTT()">Connect</button>
-  <button onclick="disconnectMQTT()">Disconnect</button>
+  <input type="text" id="message-input" placeholder="Message to send">
   <br>
-  <input type="text" id="message-input" placeholder="Message to publish">
-  <button onclick="publishMessage()">Publish</button>
+  <button onclick="connectAndSend()">Connect & Send</button>
 
   <div id="status">Status: Disconnected</div>
-  <div id="messages"></div>
+  <div id="log"></div>
 
   <script>
-    let client = null;
-    let topic = "";
     const statusEl = document.getElementById("status");
-    const messagesEl = document.getElementById("messages");
+    const logEl = document.getElementById("log");
 
-    function connectMQTT() {
-      const broker = document.getElementById("broker-input").value;
-      topic = document.getElementById("topic-input").value;
+    function log(msg) {
+      const p = document.createElement("p");
+      p.textContent = msg;
+      logEl.appendChild(p);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
 
-      if (!broker || !topic) {
-        alert("Please enter Broker URL and Topic");
+    function connectAndSend() {
+      const topic = document.getElementById("topic-input").value;
+      const message = document.getElementById("message-input").value;
+
+      if (!topic || !message) {
+        alert("Please enter topic and message");
         return;
       }
 
-      client = mqtt.connect(broker, { reconnectPeriod: 1000, connectTimeout: 30*1000 });
+      // Connect to HiveMQ public broker via WebSocket
+      const client = mqtt.connect("wss://broker.hivemq.com:8000/mqtt", {
+        reconnectPeriod: 1000,
+        connectTimeout: 30*1000
+      });
 
       client.on('connect', () => {
         statusEl.innerText = "Status: Connected";
         statusEl.style.color = "green";
-        logMessage("Connected to broker");
-        client.subscribe(topic, (err) => {
-          if (err) logMessage("Subscribe error: " + err);
-          else logMessage("Subscribed to topic: " + topic);
+        log("Connected to HiveMQ broker");
+
+        // Publish message
+        client.publish(topic, message, {}, () => {
+          log(`Published message "${message}" to topic "${topic}"`);
+          client.end(); // disconnect after sending
+          statusEl.innerText = "Status: Disconnected";
+          statusEl.style.color = "red";
         });
       });
 
       client.on('error', (err) => {
         statusEl.innerText = "Status: Error";
         statusEl.style.color = "red";
-        logMessage("Error: " + err);
+        log("MQTT Error: " + err);
       });
 
       client.on('offline', () => {
         statusEl.innerText = "Status: Offline";
         statusEl.style.color = "red";
-        logMessage("Client offline");
+        log("Client offline");
       });
-
-      client.on('reconnect', () => {
-        statusEl.innerText = "Status: Reconnecting...";
-        statusEl.style.color = "orange";
-        logMessage("Reconnecting...");
-      });
-
-      client.on('message', (topic, message) => {
-        logMessage("Received on " + topic + ": " + message.toString());
-      });
-    }
-
-    function disconnectMQTT() {
-      if (client) {
-        client.end();
-        client = null;
-        statusEl.innerText = "Status: Disconnected";
-        statusEl.style.color = "red";
-        logMessage("Disconnected");
-      }
-    }
-
-    function publishMessage() {
-      if (client && client.connected) {
-        const msg = document.getElementById("message-input").value;
-        client.publish(topic, msg, {}, () => {
-          logMessage("Published: " + msg);
-        });
-      } else {
-        alert("MQTT not connected");
-      }
-    }
-
-    function logMessage(msg) {
-      const p = document.createElement("p");
-      p.textContent = msg;
-      messagesEl.appendChild(p);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
     }
   </script>
 </body>
