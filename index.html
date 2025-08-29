@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>TM + MQTT Demo (Port 8884)</title>
+  <title>Teachable Machine + MQTT (Port 8884)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { font-family: Arial; text-align:center; padding:20px; }
+    body { font-family: Arial, sans-serif; text-align:center; padding:20px; }
     #webcam-container { margin:10px auto; }
     video { max-width:100%; height:auto; }
     #label-container { margin:10px; font-size:1.2em; }
@@ -17,6 +17,7 @@
     .sending { color:orange; }
     #debug { font-family: monospace; white-space: pre-wrap; max-width:600px; margin:auto; text-align:left; }
     input { padding:5px; margin:5px; width:250px; }
+    button { padding:10px 20px; margin:5px; }
   </style>
 </head>
 <body>
@@ -76,7 +77,10 @@ async function startCamera(facingMode){
   webcam = new tmImage.Webcam(224,224,false);
   try{
     await webcam.setup({facingMode});
-    webcam.webcam.srcObject = webcam.webcam.srcObject || webcam.webcam.captureStream();
+    // แก้ปัญหา URL.createObjectURL
+    if(webcam.webcam){
+      webcam.webcam.srcObject = webcam.webcam.srcObject || webcam.webcam.captureStream();
+    }
     await webcam.play();
     document.getElementById("webcam-container").appendChild(webcam.canvas);
     requestAnimationFrame(loop);
