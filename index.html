@@ -15,6 +15,7 @@
     #mqtt-status { margin: 10px; font-weight: bold; }
     .connected { color: green; }
     .disconnected { color: red; }
+    #mqtt-log { font-size: 0.9em; color: gray; text-align:left; max-width:600px; margin:10px auto; }
   </style>
 </head>
 <body>
@@ -25,17 +26,21 @@
   <div id="mqtt-status" class="disconnected">MQTT: Disconnected</div>
   <div id="webcam-container"></div>
   <div id="label-container"></div>
+  <div id="mqtt-log"></div>
 
   <script>
     const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
     let model, webcam, labelContainer, maxPredictions;
 
     // ===================== HiveMQ Cloud MQTT Config =====================
-    const MQTT_BROKER = "wss://31b0468d101044228671b37b340faf0d.s1.eu.hivemq.cloud:8884/mqtt"; // HiveMQ Cloud WSS URL
+    const MQTT_BROKER = "wss://31b0468d101044228671b37b340faf0d.s1.eu.hivemq.cloud:8884/mqttt"; // HiveMQ Cloud WSS URL
     const MQTT_TOPIC = "somsom"; // topic ของคุณ
     const MQTT_USERNAME = "MALAGOR"; // เปลี่ยนเป็น username ของคุณ
     const MQTT_PASSWORD = "qDgZDB_w!!Uvp88"; // เปลี่ยนเป็น password ของคุณ
     let mqttClient;
+
+    const mqttLog = document.getElementById("mqtt-log");
+    const mqttStatus = document.getElementById("mqtt-status");
 
     async function init(facingMode) {
       // โหลดโมเดล
@@ -66,28 +71,36 @@
 
       // ===================== เชื่อม MQTT =====================
       mqttClient = mqtt.connect(MQTT_BROKER, {
-        username: MQTT_USERNAME,
-        password: MQTT_PASSWORD,
-        reconnectPeriod: 1000,
-        connectTimeout: 4000,
+        username: MALAGOR,
+        password: qDgZDB_w!!Uvp88,
+        protocol: "wss",           // บังคับใช้ WSS
+        reconnectPeriod: 1000,     // reconnect ทุก 1 วินาที
+        connectTimeout: 4000       // timeout 4 วินาที
       });
 
       mqttClient.on('connect', () => {
-        console.log("Connected to HiveMQ Cloud!");
-        document.getElementById("mqtt-status").innerText = "MQTT: Connected";
-        document.getElementById("mqtt-status").className = "connected";
+        mqttStatus.innerText = "MQTT: Connected";
+        mqttStatus.className = "connected";
+        mqttLog.innerHTML += "[INFO] Connected to HiveMQ Cloud<br>";
       });
 
       mqttClient.on('error', (err) => {
+        mqttStatus.innerText = "MQTT: Error";
+        mqttStatus.className = "disconnected";
+        mqttLog.innerHTML += "[ERROR] " + err + "<br>";
         console.error("MQTT Error:", err);
-        document.getElementById("mqtt-status").innerText = "MQTT: Error";
-        document.getElementById("mqtt-status").className = "disconnected";
       });
 
       mqttClient.on('close', () => {
-        console.log("MQTT connection closed");
-        document.getElementById("mqtt-status").innerText = "MQTT: Disconnected";
-        document.getElementById("mqtt-status").className = "disconnected";
+        mqttStatus.innerText = "MQTT: Disconnected";
+        mqttStatus.className = "disconnected";
+        mqttLog.innerHTML += "[INFO] Connection closed<br>";
+      });
+
+      mqttClient.on('offline', () => {
+        mqttStatus.innerText = "MQTT: Offline";
+        mqttStatus.className = "disconnected";
+        mqttLog.innerHTML += "[INFO] Client offline<br>";
       });
     }
 
@@ -124,12 +137,11 @@
       }
       if (mqttClient) {
         mqttClient.end();
-        document.getElementById("mqtt-status").innerText = "MQTT: Disconnected";
-        document.getElementById("mqtt-status").className = "disconnected";
+        mqttStatus.innerText = "MQTT: Disconnected";
+        mqttStatus.className = "disconnected";
+        mqttLog.innerHTML += "[INFO] Client disconnected<br>";
       }
     }
   </script>
 </body>
 </html>
-
-
