@@ -1,80 +1,155 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MQTT HiveMQ WebSocket Test</title>
+  <title>Teachable Machine + MQTT</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
-    input, button { padding: 5px; margin: 5px; font-size: 1em; width: 250px; }
-    #status { margin: 10px; font-weight: bold; }
-    #log { margin-top: 10px; text-align: left; max-height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
+    #webcam-container { max-width: 100%; margin: 10px auto; }
+    video { max-width: 100%; height: auto; }
+    #label-container { margin: 10px; font-size: 1.2em; }
+    button { padding: 10px 20px; font-size: 1em; margin: 5px; }
+    #mqtt-status { margin: 10px; font-weight: bold; font-size: 1.1em; }
+    .connected { color: green; }
+    .disconnected { color: red; }
+    .sending { color: orange; }
+    input { padding: 5px; font-size: 1em; margin: 5px; width: 250px; }
+    .mqtt-form { margin: 10px; }
   </style>
 </head>
 <body>
-  <h2>MQTT HiveMQ WebSocket Test</h2>
+  <h2>Teachable Machine Image Model (Mobile)</h2>
 
-  <input type="text" id="topic-input" placeholder="Topic (e.g. test/topic)">
-  <input type="text" id="message-input" placeholder="Message to send">
-  <br>
-  <button onclick="connectAndSend()">Connect & Send</button>
+  <!-- MQTT UI -->
+  <div class="mqtt-form">
+    <input type="text" id="broker-input" placeholder="Broker URL (e.g. wss://broker.hivemq.com:8000/mqtt)" value="wss://broker.hivemq.com:8000/mqtt">
+    <input type="text" id="topic-input" placeholder="Topic (e.g. tm/prediction)" value="tm/prediction">
+    <button onclick="connectMQTT()">Connect</button>
+    <button onclick="disconnectMQTT()">Disconnect</button>
+  </div>
 
-  <div id="status">Status: Disconnected</div>
-  <div id="log"></div>
+  <div id="mqtt-status" class="disconnected">MQTT: Disconnected</div>
+
+  <!-- Camera controls -->
+  <button onclick="init('environment')">Start (Back Camera)</button>
+  <button onclick="init('user')">Start (Front Camera)</button>
+  <button onclick="stop()">Stop</button>
+
+  <div id="webcam-container"></div>
+  <div id="label-container"></div>
 
   <script>
-    const statusEl = document.getElementById("status");
-    const logEl = document.getElementById("log");
+    const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
+    let model, webcam, labelContainer, maxPredictions;
+    let client = null;
+    let topic = "";
+    const mqttStatus = document.getElementById("mqtt-status");
 
-    function log(msg) {
-      const p = document.createElement("p");
-      p.textContent = msg;
-      logEl.appendChild(p);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
+    // ---------------- MQTT Functions ----------------
+    function connectMQTT() {
+      const broker = document.getElementById("broker-input").value;
+      topic = document.getElementById("topic-input").value;
+      if (!broker || !topic) { alert("Please enter Broker URL and Topic"); return; }
 
-    function connectAndSend() {
-      const topic = document.getElementById("topic-input").value;
-      const message = document.getElementById("message-input").value;
-
-      if (!topic || !message) {
-        alert("Please enter topic and message");
-        return;
-      }
-
-      // Connect to HiveMQ public broker via WebSocket
-      const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", {
-        reconnectPeriod: 1000,
-        connectTimeout: 30*1000
-      });
+      client = mqtt.connect(broker, { reconnectPeriod: 1000, connectTimeout: 30*1000 });
 
       client.on('connect', () => {
-        statusEl.innerText = "Status: Connected";
-        statusEl.style.color = "green";
-        log("Connected to HiveMQ broker");
-
-        // Publish message
-        client.publish(topic, message, {}, () => {
-          log(`Published message "${message}" to topic "${topic}"`);
-          client.end(); // disconnect after sending
-          statusEl.innerText = "Status: Disconnected";
-          statusEl.style.color = "red";
-        });
+        mqttStatus.innerText = "MQTT: Connected";
+        mqttStatus.className = "connected";
+        console.log("MQTT connected");
       });
 
-      client.on('error', (err) => {
-        statusEl.innerText = "Status: Error";
-        statusEl.style.color = "red";
-        log("MQTT Error: " + err);
+      client.on('reconnect', () => {
+        mqttStatus.innerText = "MQTT: Reconnecting...";
+        mqttStatus.className = "disconnected";
       });
 
       client.on('offline', () => {
-        statusEl.innerText = "Status: Offline";
-        statusEl.style.color = "red";
-        log("Client offline");
+        mqttStatus.innerText = "MQTT: Offline";
+        mqttStatus.className = "disconnected";
       });
+
+      client.on('error', (err) => {
+        mqttStatus.innerText = "MQTT: Error";
+        mqttStatus.className = "disconnected";
+        console.error("MQTT error:", err);
+      });
+    }
+
+    function disconnectMQTT() {
+      if (client) {
+        client.end();
+        client = null;
+        mqttStatus.innerText = "MQTT: Disconnected";
+        mqttStatus.className = "disconnected";
+      }
+    }
+
+    // ---------------- Teachable Machine Functions ----------------
+    async function init(facingMode) {
+      const modelURL = URL + "model.json";
+      const metadataURL = URL + "metadata.json";
+
+      model = await tmImage.load(modelURL, metadataURL);
+      maxPredictions = model.getTotalClasses();
+
+      webcam = new tmImage.Webcam(224, 224, false);
+      try {
+        await webcam.setup({ facingMode: facingMode });
+        await webcam.play();
+        if (!webcam.canvas) throw new Error("Webcam canvas not initialized");
+
+        window.requestAnimationFrame(loop);
+      } catch (e) {
+        console.error("Webcam setup failed:", e);
+        document.getElementById("label-container").innerText = "Error: " + e.message;
+        return;
+      }
+
+      document.getElementById("webcam-container").appendChild(webcam.canvas);
+      labelContainer = document.getElementById("label-container");
+      labelContainer.innerHTML = "";
+      for (let i = 0; i < maxPredictions; i++) {
+        labelContainer.appendChild(document.createElement("div"));
+      }
+    }
+
+    async function loop() {
+      webcam.update();
+      await predict();
+      window.requestAnimationFrame(loop);
+    }
+
+    async function predict() {
+      const prediction = await model.predict(webcam.canvas);
+      let payload = {};
+      for (let i = 0; i < maxPredictions; i++) {
+        const classPrediction = prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+        labelContainer.childNodes[i].innerHTML = classPrediction;
+        payload[prediction[i].className] = prediction[i].probability.toFixed(2);
+      }
+
+      // ส่งค่า prediction ผ่าน MQTT
+      if (client && client.connected) {
+        mqttStatus.innerText = "MQTT: Sending...";
+        mqttStatus.className = "sending";
+        client.publish(topic, JSON.stringify(payload), {}, () => {
+          mqttStatus.innerText = "MQTT: Connected";
+          mqttStatus.className = "connected";
+        });
+      }
+    }
+
+    function stop() {
+      if (webcam) {
+        webcam.stop();
+        document.getElementById("webcam-container").innerHTML = '';
+        document.getElementById("label-container").innerHTML = '';
+      }
     }
   </script>
 </body>
 </html>
-
