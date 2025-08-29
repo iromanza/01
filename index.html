@@ -1,116 +1,105 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Teachable Machine → HiveMQ Cloud</title>
+  <title>Teachable Machine + MQTT</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body{font-family:Arial;text-align:center;margin:0;padding:0;}
-    #webcam-container{max-width:100%;margin:10px auto;}
-    video{max-width:100%;height:auto;}
-    #label-container{margin:10px;font-size:1.2em;}
-    #info{margin:10px;font-size:1em;color:blue;}
-    button{padding:10px 20px;font-size:1em;margin:5px;}
+    body { font-family: Arial, sans-serif; text-align: center; margin:0; padding:0; }
+    #webcam-container { max-width: 100%; margin: 10px auto; }
+    video { max-width: 100%; height: auto; }
+    #label-container { margin: 10px; font-size: 1.2em; }
+    button { padding: 10px 20px; font-size: 1em; margin: 5px; }
   </style>
 </head>
 <body>
-<h2>Teachable Machine → HiveMQ Cloud</h2>
-<div id="info">
-  Port: <span id="port">8884</span> | Topic: <span id="topic">somsom</span>
-</div>
-<button onclick="init('environment')">Start Back Camera</button>
-<button onclick="init('user')">Start Front Camera</button>
-<button onclick="stop()">Stop</button>
-<div id="webcam-container"></div>
-<div id="label-container"></div>
+  <h2>Teachable Machine + MQTT</h2>
+  <button onclick="init('environment')">Start (Back Camera)</button>
+  <button onclick="init('user')">Start (Front Camera)</button>
+  <button onclick="stop()">Stop</button>
+  <div id="webcam-container"></div>
+  <div id="label-container"></div>
 
-<script>
-const MODEL_URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
-const MQTT_URL = "wss://broker.hivemq.cloud:8884/mqtt"; // wss endpoint ของ HiveMQ Cloud
-const MQTT_USERNAME = "MALAGOR"; // ใส่ username HiveMQ Cloud
-const MQTT_PASSWORD = "qDgZDB_w!!Uvp88"; // ใส่ password HiveMQ Cloud
-const TOPIC = "somsom";
-const PORT = 8884; // สำหรับแสดงบนเว็บ
+  <script>
+    const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
+    let model, webcam, labelContainer, maxPredictions;
 
-let model, webcam, labelContainer, maxPredictions;
-let client, sendInterval;
+    // MQTT Config
+    const MQTT_BROKER = "wss://test.mosquitto.org:8081"; // ตัวอย่าง broker ฟรี (WebSocket)
+    const MQTT_TOPIC_PREFIX = "teachable_machine/";
+    let mqttClient;
 
-// ===== CONNECT HiveMQ MQTT =====
-function connectMQTT() {
-  client = mqtt.connect(MQTT_URL, {
-    username: MQTT_USERNAME,
-    password: MQTT_PASSWORD,
-    protocol: "wss"
-  });
+    async function init(facingMode) {
+      // โหลดโมเดล
+      const modelURL = URL + "model.json";
+      const metadataURL = URL + "metadata.json";
+      model = await tmImage.load(modelURL, metadataURL);
+      maxPredictions = model.getTotalClasses();
 
-  client.on('connect', () => console.log("✅ Connected to HiveMQ Cloud"));
-  client.on('error', (err) => console.error("❌ MQTT error:", err));
-}
-connectMQTT();
+      // ตั้งค่า Webcam
+      webcam = new tmImage.Webcam(224, 224, false);
+      try {
+        await webcam.setup({ facingMode: facingMode });
+        await webcam.play();
+        window.requestAnimationFrame(loop);
+      } catch (e) {
+        console.error("Webcam setup failed:", e);
+        document.getElementById("label-container").innerText = "Error: " + e.message;
+        return;
+      }
+      document.getElementById("webcam-container").appendChild(webcam.canvas);
 
-// ===== Teachable Machine + Webcam =====
-async function init(facingMode){
-  model = await tmImage.load(MODEL_URL + "model.json", MODEL_URL + "metadata.json");
-  maxPredictions = model.getTotalClasses();
+      // สร้าง label container
+      labelContainer = document.getElementById("label-container");
+      labelContainer.innerHTML = "";
+      for (let i = 0; i < maxPredictions; i++) {
+        labelContainer.appendChild(document.createElement("div"));
+      }
 
-  webcam = new tmImage.Webcam(224,224,false);
-  try{
-    await webcam.setup({facingMode});
-    await webcam.play();
-    document.getElementById("webcam-container").appendChild(webcam.canvas);
-    labelContainer = document.getElementById("label-container");
-    labelContainer.innerHTML="";
-    for(let i=0;i<maxPredictions;i++) labelContainer.appendChild(document.createElement("div"));
-    window.requestAnimationFrame(loop);
-  }catch(e){
-    console.error("Webcam error",e);
-    labelContainer.innerText="Error: "+e.message;
-  }
-}
+      // เชื่อม MQTT
+      mqttClient = mqtt.connect(MQTT_BROKER);
+      mqttClient.on('connect', () => {
+        console.log("Connected to MQTT Broker!");
+      });
+      mqttClient.on('error', (err) => {
+        console.error("MQTT Error:", err);
+      });
+    }
 
-// ===== Main loop =====
-async function loop(){
-  webcam.update();
-  await predict();
+    async function loop() {
+      webcam.update();
+      await predict();
+      window.requestAnimationFrame(loop);
+    }
 
-  if(client && client.connected && !sendInterval){
-    sendInterval = setInterval(()=>{
-      webcam.canvas.toBlob(blob=>{
-        if(blob){
-          blob.arrayBuffer().then(buf=>{
-            client.publish(TOPIC, buf); // ส่ง frame binary
-          });
+    async function predict() {
+      const prediction = await model.predict(webcam.canvas);
+
+      for (let i = 0; i < maxPredictions; i++) {
+        const className = prediction[i].className;
+        const probability = prediction[i].probability.toFixed(2);
+        labelContainer.childNodes[i].innerHTML = `${className}: ${probability}`;
+
+        // ส่งไป MQTT แบบ JSON
+        if (mqttClient && mqttClient.connected) {
+          const payload = JSON.stringify({ class: className, probability: probability, timestamp: Date.now() });
+          mqttClient.publish(`${MQTT_TOPIC_PREFIX}${className}`, payload);
         }
-      },"image/jpeg",0.7);
-    },1000/5); // 5 FPS
-  }
+      }
+    }
 
-  window.requestAnimationFrame(loop);
-}
-
-// ===== Prediction & MQTT =====
-async function predict(){
-  const prediction = await model.predict(webcam.canvas);
-  const results=[];
-  for(let i=0;i<maxPredictions;i++){
-    const classPrediction = prediction[i].className+": "+prediction[i].probability.toFixed(2);
-    labelContainer.childNodes[i].innerHTML=classPrediction;
-    results.push({className:prediction[i].className, probability:prediction[i].probability});
-  }
-
-  if(client && client.connected){
-    client.publish(TOPIC, JSON.stringify({type:"prediction", ts:Date.now(), results}));
-  }
-}
-
-// ===== Stop webcam =====
-function stop(){
-  if(webcam){ webcam.stop(); document.getElementById("webcam-container").innerHTML=''; document.getElementById("label-container").innerHTML=''; }
-  if(sendInterval){ clearInterval(sendInterval); sendInterval=null; }
-  if(client && client.connected){ client.publish(TOPIC, JSON.stringify({type:"stop", ts:Date.now()})); }
-}
-</script>
+    function stop() {
+      if (webcam) {
+        webcam.stop();
+        document.getElementById("webcam-container").innerHTML = '';
+        document.getElementById("label-container").innerHTML = '';
+      }
+      if (mqttClient) {
+        mqttClient.end();
+      }
+    }
+  </script>
 </body>
 </html>
