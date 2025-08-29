@@ -1,50 +1,58 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Teachable Machine + MQTT</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <title>Teachable Machine Image Model + MQTT</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; }
+    #webcam-container { max-width: 100%; margin: 10px auto; }
+    video { max-width: 100%; height: auto; }
+    #label-container { margin: 10px; font-size: 1.2em; }
+    button { padding: 10px 20px; font-size: 1em; margin: 5px; }
+  </style>
 </head>
 <body>
-  <h1>Teachable Machine → MQTT</h1>
-  <video id="webcam" autoplay playsinline width="320" height="240"></video>
+  <div>Teachable Machine Image Model + MQTT</div>
+  <button onclick="init('environment')">Start (Back Camera)</button>
+  <button onclick="init('user')">Start (Front Camera)</button>
+  <button onclick="stop()">Stop</button>
+  <div id="webcam-container"></div>
+  <div id="label-container"></div>
 
-  <script>
-    // ====== MQTT Setup ======
-    const broker = "wss://1e1e9581694f459bba546a40c75d5445.s1.eu.hivemq.cloud:8884/mqtt"; // ใช้ wss สำหรับ SSL
-    const options = {
-      username: "Tinyyy",
-      password: "Tiny0330",
-      reconnectPeriod: 1000
-    };
-    const client = mqtt.connect(broker, options);
-
-    client.on('connect', () => {
-      console.log("Connected to HiveMQ broker!");
-    });
-
-    client.on('error', (err) => {
-      console.error("MQTT Error:", err);
-    });
-
-    // ====== Teachable Machine Setup ======
+  <script type="text/javascript">
     const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
-    let model, webcam, maxPredictions;
+    let model, webcam, labelContainer, maxPredictions;
 
-    async function init() {
+    // MQTT setup
+    const client = new Paho.MQTT.Client("broker.hivemq.com", 8000, "clientId-" + Math.floor(Math.random()*1000));
+    client.onConnectionLost = e => console.log("MQTT connection lost:", e.errorMessage);
+    client.onMessageArrived = m => console.log("MQTT message:", m.payloadString);
+    client.connect({onSuccess: () => console.log("Connected to MQTT broker")});
+
+    async function init(facingMode) {
       const modelURL = URL + "model.json";
       const metadataURL = URL + "metadata.json";
-
       model = await tmImage.load(modelURL, metadataURL);
       maxPredictions = model.getTotalClasses();
 
-      webcam = new tmImage.Webcam(320, 240, true);
-      await webcam.setup();
-      await webcam.play();
-      window.requestAnimationFrame(loop);
-      document.getElementById("webcam").appendChild(webcam.canvas);
+      webcam = new tmImage.Webcam(224, 224, false);
+      try {
+        await webcam.setup({ facingMode: facingMode });
+        await webcam.play();
+        window.requestAnimationFrame(loop);
+      } catch (e) {
+        console.error("Webcam setup failed:", e);
+        document.getElementById("label-container").innerText = "Error: " + e.message;
+        return;
+      }
+
+      document.getElementById("webcam-container").appendChild(webcam.canvas);
+      labelContainer = document.getElementById("label-container");
+      labelContainer.innerHTML = "";
+      for (let i = 0; i < maxPredictions; i++) labelContainer.appendChild(document.createElement("div"));
     }
 
     async function loop() {
@@ -54,21 +62,30 @@
     }
 
     async function predict() {
-      const predictions = await model.predict(webcam.canvas);
-      predictions.forEach(pred => {
-        if (pred.probability > 0.9) { // Threshold
-          console.log(`${pred.className}: ${pred.probability.toFixed(2)}`);
-          client.publish("teachablemachine/prediction", JSON.stringify({
-            class: pred.className,
-            probability: pred.probability.toFixed(2),
-            timestamp: new Date().toISOString()
-          }));
-        }
-      });
+      const prediction = await model.predict(webcam.canvas);
+      let payload = {};
+      for (let i = 0; i < maxPredictions; i++) {
+        const classPrediction = prediction[i].className;
+        const probability = prediction[i].probability.toFixed(2);
+        labelContainer.childNodes[i].innerHTML = classPrediction + ": " + probability;
+        payload[classPrediction] = probability;
+      }
+
+      // ส่งไป MQTT
+      if (client.isConnected()) {
+        const message = new Paho.MQTT.Message(JSON.stringify(payload));
+        message.destinationName = "Tinyy";
+        client.send(message);
+      }
     }
 
-    init();
+    function stop() {
+      if (webcam) {
+        webcam.stop();
+        document.getElementById("webcam-container").innerHTML = '';
+        document.getElementById("label-container").innerHTML = '';
+      }
+    }
   </script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
 </body>
 </html>
