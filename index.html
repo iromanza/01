@@ -41,6 +41,7 @@
 
 <script>
 let model, webcam, client, topic;
+let lastSentClass = null; // ป้องกันการส่งซ้ำ
 const debug = document.getElementById("debug");
 const mqttStatus = document.getElementById("mqtt-status");
 
@@ -54,18 +55,36 @@ function logDebug(msg){
 function connectMQTT(){
   const broker = document.getElementById("broker-input").value;
   topic = document.getElementById("topic-input").value;
-  if(!broker||!topic){ alert("Enter Broker and Topic"); return; }
+  if(!broker || !topic){ alert("Enter Broker and Topic"); return; }
   const clientId = "tm_client_"+Math.random().toString(16).substr(2,8);
 
   client = mqtt.connect(broker, { clientId, clean:true, connectTimeout:4000, reconnectPeriod:1000, protocolVersion:4 });
 
-  client.on('connect', ()=> { mqttStatus.innerText="MQTT: Connected"; mqttStatus.className="connected"; logDebug("MQTT Connected"); });
-  client.on('offline', ()=> { mqttStatus.innerText="MQTT: Offline"; mqttStatus.className="disconnected"; logDebug("MQTT Offline"); });
-  client.on('error', err=> { mqttStatus.innerText="MQTT: Error"; mqttStatus.className="disconnected"; logDebug("MQTT Error: "+JSON.stringify(err)); });
+  client.on('connect', ()=> { 
+    mqttStatus.innerText="MQTT: Connected"; 
+    mqttStatus.className="connected"; 
+    logDebug("MQTT Connected"); 
+  });
+  client.on('offline', ()=> { 
+    mqttStatus.innerText="MQTT: Offline"; 
+    mqttStatus.className="disconnected"; 
+    logDebug("MQTT Offline"); 
+  });
+  client.on('error', err=> { 
+    mqttStatus.innerText="MQTT: Error"; 
+    mqttStatus.className="disconnected"; 
+    logDebug("MQTT Error: "+JSON.stringify(err)); 
+  });
 }
 
 function disconnectMQTT(){
-  if(client){ client.end(); client=null; mqttStatus.innerText="MQTT: Disconnected"; mqttStatus.className="disconnected"; }
+  if(client){ 
+    client.end(); 
+    client=null; 
+    mqttStatus.innerText="MQTT: Disconnected"; 
+    mqttStatus.className="disconnected"; 
+    logDebug("MQTT Disconnected");
+  }
 }
 
 // ---------------- Camera ----------------
@@ -75,9 +94,6 @@ async function startCamera(facingMode){
   webcam = new tmImage.Webcam(224,224,false);
   try{
     await webcam.setup({facingMode});
-    if(webcam.webcam){
-      webcam.webcam.srcObject = webcam.webcam.srcObject || webcam.webcam.captureStream();
-    }
     await webcam.play();
     document.getElementById("webcam-container").appendChild(webcam.canvas);
     requestAnimationFrame(loop);
@@ -89,12 +105,18 @@ async function startCamera(facingMode){
 }
 
 function stopCamera(){
-  if(webcam){ webcam.stop(); document.getElementById("webcam-container").innerHTML=''; document.getElementById("label-container").innerHTML=''; logDebug("Camera stopped"); }
+  if(webcam){ 
+    webcam.stop(); 
+    document.getElementById("webcam-container").innerHTML=''; 
+    document.getElementById("label-container").innerHTML=''; 
+    logDebug("Camera stopped"); 
+    lastSentClass = null;
+  }
 }
 
 // ---------------- Loop & Predict ----------------
 async function loop(){
-  webcam.update();
+  if(webcam) webcam.update();
   const prediction = await model.predict(webcam.canvas);
 
   // หา class ที่มี probability สูงสุด
@@ -103,19 +125,22 @@ async function loop(){
   // แสดง class เดียว + probability
   document.getElementById("label-container").innerText = `${maxClass.className}: ${maxClass.probability.toFixed(2)}`;
 
-  // ส่ง MQTT เฉพาะเมื่อ probability >= 0.8
+  // ส่ง MQTT เฉพาะ class สูงสุด ≥ 0.8 และไม่ซ้ำ class เดิม
   if(maxClass.probability >= 0.8 && client && client.connected){
-    mqttStatus.innerText="MQTT: Sending...";
-    mqttStatus.className="sending";
+    if(lastSentClass !== maxClass.className){
+      lastSentClass = maxClass.className;
+      mqttStatus.innerText = "MQTT: Sending...";
+      mqttStatus.className = "sending";
 
-    const payload = {};
-    payload[maxClass.className] = maxClass.probability.toFixed(2);
+      const payload = {};
+      payload[maxClass.className] = parseFloat(maxClass.probability.toFixed(2));
 
-    client.publish(topic, JSON.stringify(payload), {}, ()=>{
-      mqttStatus.innerText="MQTT: Connected";
-      mqttStatus.className="connected";
-      logDebug("Sent MQTT (only max class ≥0.8): "+JSON.stringify(payload));
-    });
+      client.publish(topic, JSON.stringify(payload), {}, () => {
+        mqttStatus.innerText = "MQTT: Connected";
+        mqttStatus.className = "connected";
+        logDebug("Sent MQTT: " + JSON.stringify(payload));
+      });
+    }
   }
 
   requestAnimationFrame(loop);
