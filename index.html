@@ -26,11 +26,28 @@
     const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
     let model, webcam, labelContainer, maxPredictions;
 
-    // MQTT Config
-    const MQTT_BROKER = "wss://test.mosquitto.org:8081"; // ตัวอย่าง broker ฟรี (WebSocket)
-    const MQTT_TOPIC_PREFIX = "teachable_machine/";
-    let mqttClient;
+// MQTT Config
+const MQTT_BROKER = "wss://your-mqtt-broker.com:8884"; // เปลี่ยนเป็น broker ของคุณ
+const MQTT_TOPIC = "8nv/somsom"; // ชื่อ topic ใหม่
+let mqttClient;
 
+// ...
+
+async function predict() {
+  const prediction = await model.predict(webcam.canvas);
+
+  for (let i = 0; i < maxPredictions; i++) {
+    const className = prediction[i].className;
+    const probability = prediction[i].probability.toFixed(2);
+    labelContainer.childNodes[i].innerHTML = `${className}: ${probability}`;
+
+    // ส่งไป MQTT ทุก class ใน topic เดียว
+    if (mqttClient && mqttClient.connected) {
+      const payload = JSON.stringify({ class: className, probability, timestamp: Date.now() });
+      mqttClient.publish(MQTT_TOPIC, payload);
+    }
+  }
+}
     async function init(facingMode) {
       // โหลดโมเดล
       const modelURL = URL + "model.json";
@@ -103,3 +120,4 @@
   </script>
 </body>
 </html>
+
