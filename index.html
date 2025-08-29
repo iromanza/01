@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>TM + MQTT Dashboard (Stable Camera)</title>
+  <title>Teachable Machine + MQTT (Port 8884)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { font-family: Arial; text-align:center; padding:20px; }
+    body { font-family: Arial, sans-serif; text-align:center; padding:20px; }
     #webcam-container { margin:10px auto; }
     video { max-width:100%; height:auto; }
     #label-container { margin:10px; font-size:1.2em; }
@@ -18,14 +18,10 @@
     #debug { font-family: monospace; white-space: pre-wrap; max-width:600px; margin:auto; text-align:left; }
     input { padding:5px; margin:5px; width:250px; }
     button { padding:10px 20px; margin:5px; }
-
-    .bar-container { display:flex; justify-content:center; margin-top:10px; }
-    .bar { width:60px; height:200px; margin:0 10px; background:#eee; position:relative; display:flex; align-items:flex-end; justify-content:center; font-weight:bold; border-radius:5px; overflow:hidden; }
-    .fill { width:100%; background:#4caf50; text-align:center; color:white; font-size:14px; }
   </style>
 </head>
 <body>
-  <h2>Teachable Machine + MQTT Dashboard</h2>
+  <h2>Teachable Machine + MQTT (Port 8884)</h2>
 
   <!-- MQTT UI -->
   <input id="broker-input" value="wss://broker.hivemq.com:8884/mqtt" placeholder="Broker URL">
@@ -41,13 +37,6 @@
 
   <div id="webcam-container"></div>
   <div id="label-container"></div>
-
-  <div class="bar-container">
-    <div class="bar"><div id="bar-มะละกอ" class="fill">0%</div></div>
-    <div class="bar"><div id="bar-กล้วย" class="fill">0%</div></div>
-    <div class="bar"><div id="bar-ส้ม" class="fill">0%</div></div>
-  </div>
-
   <div id="debug"></div>
 
 <script>
@@ -55,7 +44,7 @@ let model, webcam, client, topic;
 const debug = document.getElementById("debug");
 const mqttStatus = document.getElementById("mqtt-status");
 
-// ---------------- MQTT ----------------
+// ---------------- MQTT Functions ----------------
 function logDebug(msg){
   const time = new Date().toLocaleTimeString();
   debug.innerText += `[${time}] ${msg}\n`;
@@ -68,7 +57,9 @@ function connectMQTT(){
   if(!broker||!topic){ alert("Enter Broker and Topic"); return; }
   const clientId = "tm_client_"+Math.random().toString(16).substr(2,8);
 
-  client = mqtt.connect(broker, { clientId, clean:true, connectTimeout:4000, reconnectPeriod:1000, protocolVersion:4 });
+  client = mqtt.connect(broker, {
+    clientId, clean:true, connectTimeout:4000, reconnectPeriod:1000, protocolVersion:4
+  });
 
   client.on('connect', ()=> { mqttStatus.innerText="MQTT: Connected"; mqttStatus.className="connected"; logDebug("MQTT Connected"); });
   client.on('offline', ()=> { mqttStatus.innerText="MQTT: Offline"; mqttStatus.className="disconnected"; logDebug("MQTT Offline"); });
@@ -79,7 +70,7 @@ function disconnectMQTT(){
   if(client){ client.end(); client=null; mqttStatus.innerText="MQTT: Disconnected"; mqttStatus.className="disconnected"; }
 }
 
-// ---------------- Camera ----------------
+// ---------------- Teachable Machine ----------------
 async function startCamera(facingMode){
   const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
   model = await tmImage.load(URL+"model.json", URL+"metadata.json");
@@ -95,7 +86,7 @@ async function startCamera(facingMode){
     requestAnimationFrame(loop);
     logDebug("Camera started: "+facingMode);
   }catch(e){
-    alert("Cannot access camera: "+e.message+"\nPlease check HTTPS or browser permissions.");
+    alert("Cannot access camera: "+e.message);
     logDebug("Camera error: "+e.message);
   }
 }
@@ -104,43 +95,20 @@ function stopCamera(){
   if(webcam){ webcam.stop(); document.getElementById("webcam-container").innerHTML=''; document.getElementById("label-container").innerHTML=''; logDebug("Camera stopped"); }
 }
 
-// ---------------- Loop & Predict ----------------
 async function loop(){
   webcam.update();
   const prediction = await model.predict(webcam.canvas);
+  let payload={};
+  prediction.forEach(p=>{ payload[p.className]=p.probability.toFixed(2); });
+  document.getElementById("label-container").innerText=JSON.stringify(payload,null,2);
 
-  // หา class สูงสุด
-  let maxClass = prediction.reduce((prev,curr)=> (curr.probability>prev.probability?curr:prev));
-
-  if(maxClass.probability >= 0.8){
-    document.getElementById("label-container").innerText = maxClass.className + ": " + maxClass.probability.toFixed(2);
-
-    // ส่ง MQTT เฉพาะ class สูงสุด
-    if(client && client.connected){
-      mqttStatus.innerText="MQTT: Sending..."; 
-      mqttStatus.className="sending";
-
-      const payload = {};
-      payload[maxClass.className] = maxClass.probability.toFixed(2);
-      client.publish(topic, JSON.stringify(payload), {}, ()=>{
-        mqttStatus.innerText="MQTT: Connected"; 
-        mqttStatus.className="connected";
-        logDebug("Sent MQTT (only max class): "+JSON.stringify(payload));
-      });
-    }
-  } else {
-    document.getElementById("label-container").innerText = "No confident prediction";
+  if(client && client.connected){
+    mqttStatus.innerText="MQTT: Sending..."; mqttStatus.className="sending";
+    client.publish(topic, JSON.stringify(payload), {}, ()=>{
+      mqttStatus.innerText="MQTT: Connected"; mqttStatus.className="connected";
+      logDebug("Sent MQTT: "+JSON.stringify(payload));
+    });
   }
-
-  // อัพเดต bar chart
-  prediction.forEach(p=>{
-    const bar = document.getElementById("bar-"+p.className);
-    const pct = Math.round(p.probability*100);
-    bar.style.height = pct+"%";
-    bar.innerText = pct+"%";
-    bar.style.backgroundColor = (p===maxClass) ? "#4caf50" : "#aaa";
-  });
-
   requestAnimationFrame(loop);
 }
 </script>
