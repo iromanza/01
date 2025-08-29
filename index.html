@@ -1,114 +1,73 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Teachable Machine + HiveMQ Cloud</title>
+  <title>MQTT Test with HiveMQ Cloud</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <script src="https://unpkg.com/paho-mqtt/mqttws31.min.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; }
-    #webcam-container { max-width: 100%; margin: 10px auto; }
-    video { max-width: 100%; height: auto; }
-    #label-container { margin: 10px; font-size: 1.2em; }
-    button { padding: 10px 20px; font-size: 1em; margin: 5px; }
-  </style>
 </head>
 <body>
-  <h2>Teachable Machine + HiveMQ Cloud</h2>
-  <button onclick="init('environment')">Start (Back Camera)</button>
-  <button onclick="init('user')">Start (Front Camera)</button>
-  <button onclick="stop()">Stop</button>
-
-  <div id="webcam-container"></div>
-  <div id="label-container"></div>
+  <h2>MQTT Test → HiveMQ Cloud</h2>
+  <div id="status">Connecting...</div>
+  <div id="log"></div>
 
   <script>
-    const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
+    // ==== HiveMQ Cloud Config ====
+    const brokerHost = "1e1e9581694f459bba546a40c75d5445.s1.eu.hivemq.cloud"; // 👉 ใส่ host ของคุณ
+    const brokerPort = 8884;                        // ใช้ WebSocket Secure (WSS)
+    const topic = "tm/test";                        // topic ที่จะส่งข้อความ
+    const mqttUser = "Thiyyy";               // 👉 ใส่ username ของคุณ
+    const mqttPass = "Thiny0330";               // 👉 ใส่ password ของคุณ
 
-    let model, webcam, labelContainer, maxPredictions;
     let client;
 
-    // === HiveMQ Cloud Config ===
-    const brokerHost = "1e1e9581694f459bba546a40c75d5445.s1.eu.hivemq.cloud"; // 👉 ใส่ host ของคุณ
-    const brokerPort = 8884;                        // ใช้ WebSocket Secure
-    const topic = "tm/predict";                     // topic ที่จะส่งผลลัพธ์
-    const mqttUser = "Tinyyy";               // 👉 ใส่ username ของคุณ
-    const mqttPass = "Tiny0330";               // 👉 ใส่ password ของคุณ
+    // สร้าง MQTT Client
+    client = new Paho.MQTT.Client(brokerHost, brokerPort, "clientId-" + Math.random());
 
-    // Connect to HiveMQ Cloud
-    function connectMQTT() {
-      client = new Paho.MQTT.Client(brokerHost, brokerPort, "clientId-" + Math.random());
-      client.connect({
-        useSSL: true,
-        userName: mqttUser,
-        password: mqttPass,
-        onSuccess: () => console.log("✅ Connected to HiveMQ Cloud"),
-        onFailure: (e) => console.error("❌ HiveMQ connect failed:", e)
-      });
-    }
-    connectMQTT();
-
-    async function init(facingMode) {
-      const modelURL = URL + "model.json";
-      const metadataURL = URL + "metadata.json";
-
-      model = await tmImage.load(modelURL, metadataURL);
-      maxPredictions = model.getTotalClasses();
-
-      webcam = new tmImage.Webcam(224, 224, false);
-      try {
-        await webcam.setup({ facingMode });
-        await webcam.play();
-        window.requestAnimationFrame(loop);
-      } catch (e) {
-        document.getElementById("label-container").innerText = "Webcam error: " + e.message;
-        return;
+    // Callback เมื่อ disconnect
+    client.onConnectionLost = function(responseObject) {
+      if (responseObject.errorCode !== 0) {
+        log("❌ Connection lost: " + responseObject.errorMessage);
       }
+    };
 
-      document.getElementById("webcam-container").appendChild(webcam.canvas);
-      labelContainer = document.getElementById("label-container");
-      labelContainer.innerHTML = "";
-      for (let i = 0; i < maxPredictions; i++) {
-        labelContainer.appendChild(document.createElement("div"));
+    // Callback เมื่อมีข้อความเข้า
+    client.onMessageArrived = function(message) {
+      log("📥 Received on " + message.destinationName + ": " + message.payloadString);
+    };
+
+    // Connect ไปยัง HiveMQ Cloud
+    client.connect({
+      useSSL: true,
+      userName: mqttUser,
+      password: mqttPass,
+      onSuccess: () => {
+        log("✅ Connected to HiveMQ Cloud");
+        document.getElementById("status").innerText = "Connected ✅";
+
+        // Subscribe เพื่อรับข้อความจาก topic เดียวกัน
+        client.subscribe(topic);
+        log("📡 Subscribed to topic: " + topic);
+
+        // ส่งข้อความ dummy ทุกๆ 3 วินาที
+        setInterval(() => {
+          if (client.isConnected()) {
+            const msg = new Paho.MQTT.Message("Hello MQTT! " + new Date().toLocaleTimeString());
+            msg.destinationName = topic;
+            client.send(msg);
+            log("📤 Sent message to " + topic);
+          }
+        }, 3000);
+      },
+      onFailure: (e) => {
+        log("❌ Failed to connect: " + e.errorMessage);
+        document.getElementById("status").innerText = "Connect Failed ❌";
       }
-    }
+    });
 
-    async function loop() {
-      webcam.update();
-      await predict();
-      window.requestAnimationFrame(loop);
-    }
-
-    async function predict() {
-      const prediction = await model.predict(webcam.canvas);
-      let payload = {};
-
-      for (let i = 0; i < maxPredictions; i++) {
-        const classPrediction = prediction[i].className + ": " + prediction[i].probability.toFixed(2);
-        labelContainer.childNodes[i].innerHTML = classPrediction;
-        payload[prediction[i].className] = prediction[i].probability.toFixed(2);
-      }
-
-      // ส่งไป HiveMQ Cloud
-      if (client && client.isConnected()) {
-        const msg = new Paho.MQTT.Message(JSON.stringify(payload));
-        msg.destinationName = topic;
-        client.send(msg);
-        console.log("📤 Sent to HiveMQ:", payload);
-      }
-    }
-
-    function stop() {
-      if (webcam) {
-        webcam.stop();
-        document.getElementById("webcam-container").innerHTML = '';
-        document.getElementById("label-container").innerHTML = '';
-      }
-      if (client && client.isConnected()) {
-        client.disconnect();
-        console.log("🔌 MQTT disconnected");
-      }
+    function log(message) {
+      console.log(message);
+      const logDiv = document.getElementById("log");
+      logDiv.innerHTML = message + "<br>" + logDiv.innerHTML;
     }
   </script>
 </body>
