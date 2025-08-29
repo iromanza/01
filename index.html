@@ -31,7 +31,7 @@
     let model, webcam, labelContainer, maxPredictions;
 
     // MQTT Config
-    const MQTT_BROKER = "wss://broker.hivemq.cloud:8884/mqtt"; // เปลี่ยนเป็น broker ของคุณ
+    const MQTT_BROKER = "wss://test.mosquitto.org:8081"; // เปลี่ยนเป็น broker ของคุณ
     const MQTT_TOPIC = "somsom"; // topic ชื่อใหม่
     let mqttClient;
 
@@ -68,7 +68,7 @@
       });
 
       mqttClient.on('connect', () => {
-        console.log("Connected to MQTT Broker on port 8884!");
+        console.log("Connected to MQTT Broker on port 8081!");
         document.getElementById("mqtt-status").innerText = "MQTT: Connected";
         document.getElementById("mqtt-status").className = "connected";
       });
@@ -125,3 +125,4 @@
   </script>
 </body>
 </html>
+
