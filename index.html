@@ -1,21 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Teachable Machine + MQTT (Port 8884)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/np<!DOCTYPE html>
-<html>
-<head>
   <title>Teachable Machine + MQTT</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { font-family: Arial; text-align:center; padding:20px; }
+    body { font-family: Arial, sans-serif; text-align:center; padding:20px; }
     #webcam-container { margin:10px auto; }
     video { max-width:100%; height:auto; }
-    #label-container { margin:10px; font-size:1.2em; }
+    #label-container { margin:10px; font-size:1.2em; font-weight:bold; }
     #mqtt-status { font-weight:bold; margin:10px; }
     .connected { color:green; }
     .disconnected { color:red; }
@@ -46,7 +41,7 @@
 
 <script>
 let model, webcam, client, topic;
-let lastSentClass = null; // ป้องกันการส่งซ้ำ
+let lastSentClass = null;
 const debug = document.getElementById("debug");
 const mqttStatus = document.getElementById("mqtt-status");
 
@@ -84,8 +79,7 @@ function connectMQTT(){
 
 function disconnectMQTT(){
   if(client){ 
-    client.end(); 
-    client=null; 
+    client.end(); client=null; 
     mqttStatus.innerText="MQTT: Disconnected"; 
     mqttStatus.className="disconnected"; 
     logDebug("MQTT Disconnected");
@@ -98,7 +92,7 @@ async function startCamera(facingMode){
   model = await tmImage.load(URL+"model.json", URL+"metadata.json");
   webcam = new tmImage.Webcam(224,224,false);
   try{
-    await webcam.setup({ facingMode: facingMode }); 
+    await webcam.setup({ facingMode }); 
     await webcam.play();
     document.getElementById("webcam-container").innerHTML = '';
     document.getElementById("webcam-container").appendChild(webcam.canvas);
@@ -120,183 +114,4 @@ function stopCamera(){
   }
 }
 
-// ---------------- Loop & Predict ----------------
-async function loop(){
-  if(webcam) webcam.update();
-  const prediction = await model.predict(webcam.canvas);
-
-  // หา class ที่มี probability สูงสุด
-  let maxClass = prediction.reduce((prev, curr) => (curr.probability > prev.probability ? curr : prev));
-
-  // แสดง class เดียว + probability
-  document.getElementById("label-container").innerText = `${maxClass.className}: ${maxClass.probability.toFixed(2)}`;
-
-  // ส่ง MQTT เฉพาะ class สูงสุด ≥ 0.8 และไม่ซ้ำ class เดิม
-  if(maxClass.probability >= 0.8 && client && client.connected){
-    if(lastSentClass !== maxClass.className){
-      lastSentClass = maxClass.className;
-      mqttStatus.innerText = "MQTT: Sending...";
-      mqttStatus.className = "sending";
-
-      const payload = {};
-      payload[maxClass.className] = parseFloat(maxClass.probability.toFixed(2));
-
-      client.publish(topic, JSON.stringify(payload), {}, () => {
-        mqttStatus.innerText = "MQTT: Connected";
-        mqttStatus.className = "connected";
-        logDebug("Sent MQTT: " + JSON.stringify(payload));
-      });
-    }
-  }
-
-  requestAnimationFrame(loop);
-}
-</script>
-</body>
-</html>
-m/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <style>
-    body { font-family: Arial; text-align:center; padding:20px; }
-    #webcam-container { margin:10px auto; }
-    video { max-width:100%; height:auto; }
-    #label-container { margin:10px; font-size:1.2em; }
-    #mqtt-status { font-weight:bold; margin:10px; }
-    .connected { color:green; }
-    .disconnected { color:red; }
-    .sending { color:orange; }
-    #debug { font-family: monospace; white-space: pre-wrap; max-width:600px; margin:auto; text-align:left; }
-    input { padding:5px; margin:5px; width:250px; }
-    button { padding:10px 20px; margin:5px; }
-  </style>
-</head>
-<body>
-  <h2>Teachable Machine + MQTT</h2>
-
-  <!-- MQTT UI -->
-  <input id="broker-input" value="wss://broker.hivemq.com:8884/mqtt" placeholder="Broker URL">
-  <input id="topic-input" value="tm/prediction" placeholder="Topic">
-  <button onclick="connectMQTT()">Connect MQTT</button>
-  <button onclick="disconnectMQTT()">Disconnect MQTT</button>
-  <div id="mqtt-status" class="disconnected">MQTT: Disconnected</div>
-
-  <!-- Camera controls -->
-  <button onclick="startCamera('environment')">Start Back Camera</button>
-  <button onclick="startCamera('user')">Start Front Camera</button>
-  <button onclick="stopCamera()">Stop Camera</button>
-
-  <div id="webcam-container"></div>
-  <div id="label-container"></div>
-  <div id="debug"></div>
-
-<script>
-let model, webcam, client, topic;
-let lastSentClass = null; // ป้องกันการส่งซ้ำ
-const debug = document.getElementById("debug");
-const mqttStatus = document.getElementById("mqtt-status");
-
-// ---------------- MQTT ----------------
-function logDebug(msg){
-  const time = new Date().toLocaleTimeString();
-  debug.innerText += `[${time}] ${msg}\n`;
-  debug.scrollTop = debug.scrollHeight;
-}
-
-function connectMQTT(){
-  const broker = document.getElementById("broker-input").value;
-  topic = document.getElementById("topic-input").value;
-  if(!broker || !topic){ alert("Enter Broker and Topic"); return; }
-  const clientId = "tm_client_"+Math.random().toString(16).substr(2,8);
-
-  client = mqtt.connect(broker, { clientId, clean:true, connectTimeout:4000, reconnectPeriod:1000, protocolVersion:4 });
-
-  client.on('connect', ()=> { 
-    mqttStatus.innerText="MQTT: Connected"; 
-    mqttStatus.className="connected"; 
-    logDebug("MQTT Connected"); 
-  });
-  client.on('offline', ()=> { 
-    mqttStatus.innerText="MQTT: Offline"; 
-    mqttStatus.className="disconnected"; 
-    logDebug("MQTT Offline"); 
-  });
-  client.on('error', err=> { 
-    mqttStatus.innerText="MQTT: Error"; 
-    mqttStatus.className="disconnected"; 
-    logDebug("MQTT Error: "+JSON.stringify(err)); 
-  });
-}
-
-function disconnectMQTT(){
-  if(client){ 
-    client.end(); 
-    client=null; 
-    mqttStatus.innerText="MQTT: Disconnected"; 
-    mqttStatus.className="disconnected"; 
-    logDebug("MQTT Disconnected");
-  }
-}
-
-// ---------------- Camera ----------------
-async function startCamera(facingMode){
-  const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
-  model = await tmImage.load(URL+"model.json", URL+"metadata.json");
-  webcam = new tmImage.Webcam(224,224,false);
-  try{
-    await webcam.setup({facingMode});
-    await webcam.play();
-    document.getElementById("webcam-container").appendChild(webcam.canvas);
-    requestAnimationFrame(loop);
-    logDebug("Camera started: "+facingMode);
-  }catch(e){
-    alert("Cannot access camera: "+e.message);
-    logDebug("Camera error: "+e.message);
-  }
-}
-
-function stopCamera(){
-  if(webcam){ 
-    webcam.stop(); 
-    document.getElementById("webcam-container").innerHTML=''; 
-    document.getElementById("label-container").innerHTML=''; 
-    logDebug("Camera stopped"); 
-    lastSentClass = null;
-  }
-}
-
-// ---------------- Loop & Predict ----------------
-async function loop(){
-  if(webcam) webcam.update();
-  const prediction = await model.predict(webcam.canvas);
-
-  // หา class ที่มี probability สูงสุด
-  let maxClass = prediction.reduce((prev, curr) => (curr.probability > prev.probability ? curr : prev));
-
-  // แสดง class เดียว + probability
-  document.getElementById("label-container").innerText = `${maxClass.className}: ${maxClass.probability.toFixed(2)}`;
-
-  // ส่ง MQTT เฉพาะ class สูงสุด ≥ 0.8 และไม่ซ้ำ class เดิม
-  if(maxClass.probability >= 0.8 && client && client.connected){
-    if(lastSentClass !== maxClass.className){
-      lastSentClass = maxClass.className;
-      mqttStatus.innerText = "MQTT: Sending...";
-      mqttStatus.className = "sending";
-
-      const payload = {};
-      payload[maxClass.className] = parseFloat(maxClass.probability.toFixed(2));
-
-      client.publish(topic, JSON.stringify(payload), {}, () => {
-        mqttStatus.innerText = "MQTT: Connected";
-        mqttStatus.className = "connected";
-        logDebug("Sent MQTT: " + JSON.stringify(payload));
-      });
-    }
-  }
-
-  requestAnimationFrame(loop);
-}
-</script>
-</body>
-</html>
-
+// ---------------- Loop & Predict ----
