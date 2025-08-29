@@ -18,6 +18,7 @@
     .sending { color: orange; }
     input { padding: 5px; font-size: 1em; margin: 5px; width: 250px; }
     .mqtt-form { margin: 10px; }
+    #debug { margin-top: 10px; font-family: monospace; white-space: pre-wrap; text-align: left; max-width: 600px; margin-left:auto;margin-right:auto;}
   </style>
 </head>
 <body>
@@ -40,6 +41,7 @@
 
   <div id="webcam-container"></div>
   <div id="label-container"></div>
+  <div id="debug"></div>
 
   <script>
     const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
@@ -47,6 +49,7 @@
     let client = null;
     let topic = "";
     const mqttStatus = document.getElementById("mqtt-status");
+    const debug = document.getElementById("debug");
 
     // ---------------- MQTT Functions ----------------
     function connectMQTT() {
@@ -54,7 +57,6 @@
       topic = document.getElementById("topic-input").value;
       if (!broker || !topic) { alert("Please enter Broker URL and Topic"); return; }
 
-      // สุ่ม clientId ทุกครั้ง
       const clientId = "tm_client_" + Math.random().toString(16).substr(2, 8);
 
       client = mqtt.connect(broker, {
@@ -68,23 +70,25 @@
       client.on('connect', () => {
         mqttStatus.innerText = "MQTT: Connected";
         mqttStatus.className = "connected";
-        console.log("MQTT connected with clientId:", clientId);
+        logDebug("MQTT connected with clientId: " + clientId);
       });
 
       client.on('reconnect', () => {
         mqttStatus.innerText = "MQTT: Reconnecting...";
         mqttStatus.className = "disconnected";
+        logDebug("MQTT reconnecting...");
       });
 
       client.on('offline', () => {
         mqttStatus.innerText = "MQTT: Offline";
         mqttStatus.className = "disconnected";
+        logDebug("MQTT offline");
       });
 
       client.on('error', (err) => {
-        mqttStatus.innerText = "MQTT: Error (see console)";
+        mqttStatus.innerText = "MQTT: Error (see debug)";
         mqttStatus.className = "disconnected";
-        console.error("MQTT error:", err);
+        logDebug("MQTT error: " + JSON.stringify(err));
       });
     }
 
@@ -95,6 +99,12 @@
         mqttStatus.innerText = "MQTT: Disconnected";
         mqttStatus.className = "disconnected";
       }
+    }
+
+    function logDebug(msg) {
+      const time = new Date().toLocaleTimeString();
+      debug.innerText += `[${time}] ${msg}\n`;
+      debug.scrollTop = debug.scrollHeight;
     }
 
     // ---------------- Teachable Machine Functions ----------------
@@ -108,13 +118,16 @@
       webcam = new tmImage.Webcam(224, 224, false);
       try {
         await webcam.setup({ facingMode: facingMode });
+        // แก้ปัญหา URL.createObjectURL
+        if (webcam.webcam) {
+          webcam.webcam.srcObject = webcam.webcam.srcObject || webcam.webcam.captureStream();
+        }
         await webcam.play();
-        if (!webcam.canvas) throw new Error("Webcam canvas not initialized");
-
         window.requestAnimationFrame(loop);
       } catch (e) {
         console.error("Webcam setup failed:", e);
         document.getElementById("label-container").innerText = "Error: " + e.message;
+        logDebug("Webcam setup failed: " + e.message);
         return;
       }
 
@@ -141,13 +154,14 @@
         payload[prediction[i].className] = prediction[i].probability.toFixed(2);
       }
 
-      // ส่งค่า prediction ผ่าน MQTT
       if (client && client.connected) {
         mqttStatus.innerText = "MQTT: Sending...";
         mqttStatus.className = "sending";
-        client.publish(topic, JSON.stringify(payload), {}, () => {
+        const message = JSON.stringify(payload);
+        client.publish(topic, message, {}, () => {
           mqttStatus.innerText = "MQTT: Connected";
           mqttStatus.className = "connected";
+          logDebug("Sent MQTT message: " + message);
         });
       }
     }
@@ -157,6 +171,7 @@
         webcam.stop();
         document.getElementById("webcam-container").innerHTML = '';
         document.getElementById("label-container").innerHTML = '';
+        logDebug("Webcam stopped");
       }
     }
   </script>
