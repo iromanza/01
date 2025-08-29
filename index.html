@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Teachable Machine + MQTT</title>
+  <title>Teachable Machine + MQTT Dynamic</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
@@ -16,10 +16,21 @@
     .connected { color: green; }
     .disconnected { color: red; }
     .sending { color: orange; }
+    input { padding: 5px; font-size: 1em; margin: 5px; width: 250px; }
+    .mqtt-form { margin: 10px; }
   </style>
 </head>
 <body>
   <h2>Teachable Machine Image Model (Mobile)</h2>
+
+  <div class="mqtt-form">
+    <input type="text" id="broker-input" placeholder="MQTT Broker URL (e.g. wss://broker.hivemq.com:8000/mqtt)">
+    <input type="text" id="topic-input" placeholder="Topic (e.g. tm/image/prediction)">
+    <button onclick="connectMQTT()">Connect</button>
+    <button onclick="disconnectMQTT()">Disconnect</button>
+  </div>
+
+  <div id="mqtt-status" class="disconnected">MQTT: Disconnected</div>
 
   <button onclick="init('environment')">Start (Back Camera)</button>
   <button onclick="init('user')">Start (Front Camera)</button>
@@ -27,41 +38,58 @@
 
   <div id="webcam-container"></div>
   <div id="label-container"></div>
-  <div id="mqtt-status" class="disconnected">MQTT: Disconnected</div>
 
   <script type="text/javascript">
     const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
     let model, webcam, labelContainer, maxPredictions;
 
-    // MQTT Setup
-    const mqttBroker = "wss://broker.hivemq.com:8000/mqtt";
-    const topic = "tm/image/prediction";
-    let client = mqtt.connect(mqttBroker);
-
+    let client = null;
+    let topic = "";
     const mqttStatus = document.getElementById("mqtt-status");
 
-    client.on('connect', function() {
-      console.log("Connected to HiveMQ broker");
-      mqttStatus.innerText = "MQTT: Connected";
-      mqttStatus.className = "connected";
-    });
+    // --- MQTT Functions ---
+    function connectMQTT() {
+      const broker = document.getElementById("broker-input").value;
+      topic = document.getElementById("topic-input").value;
+      if (!broker || !topic) {
+        alert("Please enter Broker URL and Topic");
+        return;
+      }
+      client = mqtt.connect(broker);
 
-    client.on('reconnect', function() {
-      mqttStatus.innerText = "MQTT: Reconnecting...";
-      mqttStatus.className = "disconnected";
-    });
+      client.on('connect', function() {
+        console.log("Connected to MQTT broker");
+        mqttStatus.innerText = "MQTT: Connected";
+        mqttStatus.className = "connected";
+      });
 
-    client.on('error', function(err){
-      console.error("MQTT Error:", err);
-      mqttStatus.innerText = "MQTT: Error";
-      mqttStatus.className = "disconnected";
-    });
+      client.on('reconnect', function() {
+        mqttStatus.innerText = "MQTT: Reconnecting...";
+        mqttStatus.className = "disconnected";
+      });
 
-    client.on('offline', function() {
-      mqttStatus.innerText = "MQTT: Offline";
-      mqttStatus.className = "disconnected";
-    });
+      client.on('error', function(err){
+        console.error("MQTT Error:", err);
+        mqttStatus.innerText = "MQTT: Error";
+        mqttStatus.className = "disconnected";
+      });
 
+      client.on('offline', function() {
+        mqttStatus.innerText = "MQTT: Offline";
+        mqttStatus.className = "disconnected";
+      });
+    }
+
+    function disconnectMQTT() {
+      if (client) {
+        client.end();
+        client = null;
+        mqttStatus.innerText = "MQTT: Disconnected";
+        mqttStatus.className = "disconnected";
+      }
+    }
+
+    // --- Teachable Machine Functions ---
     async function init(facingMode) {
       const modelURL = URL + "model.json";
       const metadataURL = URL + "metadata.json";
@@ -106,8 +134,8 @@
         payload[prediction[i].className] = prediction[i].probability.toFixed(2);
       }
 
-      // ส่งค่า prediction ไปยัง HiveMQ
-      if (client.connected) {
+      // ส่งค่า prediction ผ่าน MQTT หากเชื่อมต่อแล้ว
+      if (client && client.connected) {
         mqttStatus.innerText = "MQTT: Sending...";
         mqttStatus.className = "sending";
         client.publish(topic, JSON.stringify(payload), {}, () => {
