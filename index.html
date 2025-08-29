@@ -43,7 +43,7 @@
       }
 
       // Connect to HiveMQ public broker via WebSocket
-      const client = mqtt.connect("wss://broker.hivemq.com:8000/mqtt", {
+      const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", {
         reconnectPeriod: 1000,
         connectTimeout: 30*1000
       });
@@ -77,3 +77,4 @@
   </script>
 </body>
 </html>
+
