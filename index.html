@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Teachable Machine + MQTT</title>
+  <title>Teachable Machine + MQTT (Port 8884)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
@@ -21,12 +21,12 @@
   </style>
 </head>
 <body>
-  <h2>Teachable Machine Image Model (Mobile)</h2>
+  <h2>Teachable Machine Image Model (Mobile) + MQTT</h2>
 
   <!-- MQTT UI -->
   <div class="mqtt-form">
-    <input type="text" id="broker-input" placeholder="Broker URL (e.g. wss://broker.hivemq.com:8000/mqtt)" value="wss://broker.hivemq.com:8000/mqtt">
-    <input type="text" id="topic-input" placeholder="Topic (e.g. tm/prediction)" value="tm/prediction">
+    <input type="text" id="broker-input" value="wss://broker.hivemq.com:8884/mqtt" placeholder="Broker URL">
+    <input type="text" id="topic-input" value="tm/prediction" placeholder="Topic">
     <button onclick="connectMQTT()">Connect</button>
     <button onclick="disconnectMQTT()">Disconnect</button>
   </div>
