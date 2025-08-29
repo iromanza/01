@@ -21,7 +21,7 @@
   </style>
 </head>
 <body>
-  <h2>Teachable Machine + MQTT (Port 8884)</h2>
+  <h2>Teachable Machine + MQTT</h2>
 
   <!-- MQTT UI -->
   <input id="broker-input" value="wss://broker.hivemq.com:8884/mqtt" placeholder="Broker URL">
@@ -44,7 +44,7 @@ let model, webcam, client, topic;
 const debug = document.getElementById("debug");
 const mqttStatus = document.getElementById("mqtt-status");
 
-// ---------------- MQTT Functions ----------------
+// ---------------- MQTT ----------------
 function logDebug(msg){
   const time = new Date().toLocaleTimeString();
   debug.innerText += `[${time}] ${msg}\n`;
@@ -57,9 +57,7 @@ function connectMQTT(){
   if(!broker||!topic){ alert("Enter Broker and Topic"); return; }
   const clientId = "tm_client_"+Math.random().toString(16).substr(2,8);
 
-  client = mqtt.connect(broker, {
-    clientId, clean:true, connectTimeout:4000, reconnectPeriod:1000, protocolVersion:4
-  });
+  client = mqtt.connect(broker, { clientId, clean:true, connectTimeout:4000, reconnectPeriod:1000, protocolVersion:4 });
 
   client.on('connect', ()=> { mqttStatus.innerText="MQTT: Connected"; mqttStatus.className="connected"; logDebug("MQTT Connected"); });
   client.on('offline', ()=> { mqttStatus.innerText="MQTT: Offline"; mqttStatus.className="disconnected"; logDebug("MQTT Offline"); });
@@ -77,40 +75,5 @@ async function startCamera(facingMode){
   webcam = new tmImage.Webcam(224,224,false);
   try{
     await webcam.setup({facingMode});
-    // แก้ปัญหา URL.createObjectURL
     if(webcam.webcam){
-      webcam.webcam.srcObject = webcam.webcam.srcObject || webcam.webcam.captureStream();
-    }
-    await webcam.play();
-    document.getElementById("webcam-container").appendChild(webcam.canvas);
-    requestAnimationFrame(loop);
-    logDebug("Camera started: "+facingMode);
-  }catch(e){
-    alert("Cannot access camera: "+e.message);
-    logDebug("Camera error: "+e.message);
-  }
-}
-
-function stopCamera(){
-  if(webcam){ webcam.stop(); document.getElementById("webcam-container").innerHTML=''; document.getElementById("label-container").innerHTML=''; logDebug("Camera stopped"); }
-}
-
-async function loop(){
-  webcam.update();
-  const prediction = await model.predict(webcam.canvas);
-  let payload={};
-  prediction.forEach(p=>{ payload[p.className]=p.probability.toFixed(2); });
-  document.getElementById("label-container").innerText=JSON.stringify(payload,null,2);
-
-  if(client && client.connected){
-    mqttStatus.innerText="MQTT: Sending..."; mqttStatus.className="sending";
-    client.publish(topic, JSON.stringify(payload), {}, ()=>{
-      mqttStatus.innerText="MQTT: Connected"; mqttStatus.className="connected";
-      logDebug("Sent MQTT: "+JSON.stringify(payload));
-    });
-  }
-  requestAnimationFrame(loop);
-}
-</script>
-</body>
-</html>
+      webcam.webcam.srcObject = webcam.webcam.srcOb
