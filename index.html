@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>TM + MQTT Dashboard (Port 8884)</title>
+  <title>TM + MQTT Dashboard (Stable Camera)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
   <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image"></script>
@@ -20,11 +20,7 @@
     button { padding:10px 20px; margin:5px; }
 
     .bar-container { display:flex; justify-content:center; margin-top:10px; }
-    .bar {
-      width:60px; height:200px; margin:0 10px; background:#eee; position:relative;
-      display:flex; align-items:flex-end; justify-content:center; font-weight:bold;
-      border-radius:5px; overflow:hidden;
-    }
+    .bar { width:60px; height:200px; margin:0 10px; background:#eee; position:relative; display:flex; align-items:flex-end; justify-content:center; font-weight:bold; border-radius:5px; overflow:hidden; }
     .fill { width:100%; background:#4caf50; text-align:center; color:white; font-size:14px; }
   </style>
 </head>
@@ -90,13 +86,16 @@ async function startCamera(facingMode){
   webcam = new tmImage.Webcam(224,224,false);
   try{
     await webcam.setup({facingMode});
-    if(webcam.webcam){ webcam.webcam.srcObject = webcam.webcam.srcObject || webcam.webcam.captureStream(); }
+    // แก้ปัญหา URL.createObjectURL
+    if(webcam.webcam){
+      webcam.webcam.srcObject = webcam.webcam.srcObject || webcam.webcam.captureStream();
+    }
     await webcam.play();
     document.getElementById("webcam-container").appendChild(webcam.canvas);
     requestAnimationFrame(loop);
     logDebug("Camera started: "+facingMode);
   }catch(e){
-    alert("Cannot access camera: "+e.message);
+    alert("Cannot access camera: "+e.message+"\nPlease check HTTPS or browser permissions.");
     logDebug("Camera error: "+e.message);
   }
 }
@@ -110,13 +109,11 @@ async function loop(){
   webcam.update();
   const prediction = await model.predict(webcam.canvas);
 
-  // หา class ที่มี probability สูงสุด
-  let maxClass = prediction.reduce((prev, curr) => (curr.probability > prev.probability ? curr : prev));
+  // หา class สูงสุด
+  let maxClass = prediction.reduce((prev,curr)=> (curr.probability>prev.probability?curr:prev));
 
-  // แสดง class สูงสุดบนเว็บ
   if(maxClass.probability >= 0.8){
-    document.getElementById("label-container").innerText =
-      maxClass.className + ": " + maxClass.probability.toFixed(2);
+    document.getElementById("label-container").innerText = maxClass.className + ": " + maxClass.probability.toFixed(2);
 
     // ส่ง MQTT เฉพาะ class สูงสุด
     if(client && client.connected){
@@ -125,7 +122,6 @@ async function loop(){
 
       const payload = {};
       payload[maxClass.className] = maxClass.probability.toFixed(2);
-
       client.publish(topic, JSON.stringify(payload), {}, ()=>{
         mqttStatus.innerText="MQTT: Connected"; 
         mqttStatus.className="connected";
