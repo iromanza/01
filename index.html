@@ -14,7 +14,8 @@ body { font-family:'Segoe UI', sans-serif; background:#f5f5f5; color:#333; margi
 h1 { color:#222; margin-bottom:20px; }
 #webcam-container { margin:20px auto; border-radius:12px; overflow:hidden; box-shadow:0 0 20px rgba(0,0,0,0.2); }
 #label-container { max-width:400px; margin:15px auto; text-align:left; }
-.class-box { background:#fff; padding:12px; margin:6px 0; border-radius:10px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 6px rgba(0,0,0,0.1); transition:0.3s; }
+.class-box { background:#fff; padding:12px; margin:6px 0; border-radius:10px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 6px rgba(0,0,0,0.1); transition:0.3s; opacity:0.6; }
+.class-box.active { opacity:1; box-shadow:0 0 15px #00f; }
 .progress { height:6px; border-radius:4px; background:#eee; width:100%; margin-top:6px; overflow:hidden; }
 .progress-bar { height:100%; width:0%; border-radius:4px; background: linear-gradient(90deg,#4facfe,#00f2fe); transition: width 0.3s; }
 
@@ -60,9 +61,9 @@ const MODEL_URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
 let model, webcam, maxPredictions;
 let client;
 let msgCount = 0;
-
-// ตัวแปรเก็บคลาสล่าสุดที่ส่ง
 let lastSentClass = null;
+const THRESHOLD = 0.95;
+const IGNORE_CLASS = "None"; // class สำหรับ background หรือไม่ต้องส่ง
 
 async function startCamera(facingMode){
   model = await tmImage.load(MODEL_URL+"model.json", MODEL_URL+"metadata.json");
@@ -92,18 +93,18 @@ async function loop(){
   const prediction = await model.predict(webcam.canvas);
   renderUI(prediction);
 
-  // หาคลาสที่ probability สูงสุด
+  // prediction สูงสุด
   const topPrediction = prediction.reduce((a,b)=>a.probability>b.probability?a:b);
 
-  // ส่ง MQTT เฉพาะเมื่อ probability >=0.9 และยังไม่ได้ส่งคลาสนี้
-  if(topPrediction.probability >= 0.9 && client && client.connected){
+  // ส่ง MQTT เฉพาะเมื่อ probability สูงพอ และไม่ใช่ background
+  if(topPrediction.className !== IGNORE_CLASS && topPrediction.probability >= THRESHOLD && client && client.connected){
     if(lastSentClass !== topPrediction.className){
       sendMQTT(topPrediction.className);
       lastSentClass = topPrediction.className;
     }
   }
 
-  // รีเซ็ต lastSentClass ถ้า probability < 0.8
+  // รีเซ็ต lastSentClass ถ้า probability ต่ำ
   if(topPrediction.probability < 0.8){
     lastSentClass = null;
   }
@@ -117,6 +118,7 @@ function renderUI(prediction){
   prediction.forEach(p=>{
     const div = document.createElement("div");
     div.className="class-box";
+    if(lastSentClass === p.className) div.classList.add("active");
     div.innerHTML=`<span>${p.className}</span><span>${(p.probability*100).toFixed(1)}%</span>
       <div class="progress"><div class="progress-bar" style="width:${(p.probability*100).toFixed(1)}%"></div></div>`;
     container.appendChild(div);
@@ -136,7 +138,6 @@ function connectMQTT(){
   client.on("connect", ()=>{
     document.getElementById("mqtt-status").innerText="Connected";
     document.getElementById("mqtt-status").className="connected";
-    console.log("MQTT Connected");
   });
   client.on("error", err=>{
     document.getElementById("mqtt-status").innerText="Error";
@@ -165,19 +166,8 @@ function sendMQTT(className){
       document.getElementById("mqtt-status").className="connected";
       msgCount++;
       document.getElementById("mqtt-count").innerText = msgCount;
-      flashHighlight(className);
     });
   }
-}
-
-function flashHighlight(className){
-  const boxes = document.querySelectorAll(".class-box");
-  boxes.forEach(b=>{
-    if(b.innerText.includes(className)){
-      b.style.boxShadow = "0 0 15px #00f";
-      setTimeout(()=>b.style.boxShadow="",300);
-    }
-  });
 }
 </script>
 
