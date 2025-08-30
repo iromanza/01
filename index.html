@@ -2,130 +2,238 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <title>Teachable Machine + MQTT</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Teachable Machine MQTT UI</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #e0f7fa, #ffffff);
+      font-family: Arial, sans-serif;
+      background: #f8fafc;
       margin: 0;
-      padding: 0;
+      padding: 20px;
+      color: #333;
+    }
+    h2 { margin-bottom: 10px; }
+
+    .container {
+      max-width: 900px;
+      margin: auto;
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+
+    .flex {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-secondary { background: #6b7280; color: white; }
+
+    #webcam-container {
       display: flex;
       justify-content: center;
-      align-items: center;
-      height: 100vh;
-    }
-    .container {
-      background: #fff;
-      border-radius: 20px;
-      padding: 20px;
-      width: 360px;
-      box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-      text-align: center;
-    }
-    h2 {
-      margin-bottom: 15px;
-      font-size: 20px;
-      color: #00796b;
-    }
-    video {
-      width: 100%;
-      border-radius: 15px;
-      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    }
-    .prediction {
-      margin-top: 15px;
-      font-size: 18px;
-      font-weight: bold;
-      color: #333;
-      padding: 10px;
-      border-radius: 12px;
-      background: #f0f4f8;
-    }
-    .status {
       margin-top: 10px;
-      font-size: 14px;
-      color: #555;
     }
+    #webcam-container canvas {
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      max-width: 100%;
+      height: auto;
+    }
+
+    .class-box {
+      padding: 8px;
+      margin: 6px 0;
+      border-radius: 8px;
+      background: #f1f5f9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+    .class-box.active { background: #dbeafe; font-weight: bold; }
+    .progress {
+      width: 100%; height: 6px;
+      background: #e2e8f0;
+      border-radius: 6px;
+      margin-top: 4px;
+    }
+    .progress-bar {
+      height: 6px;
+      background: #3b82f6;
+      border-radius: 6px;
+    }
+
+    .status { font-weight: bold; }
+    .connected { color: green; }
+    .disconnected { color: red; }
+    .sending { color: orange; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>🍃 Object Detection</h2>
-    <video id="webcam" autoplay playsinline muted></video>
-    <div class="prediction" id="label-container">Waiting...</div>
-    <div class="status" id="status">MQTT: Connecting...</div>
+    <div class="card">
+      <h2>📷 Camera Control</h2>
+      <div class="flex">
+        <button class="btn btn-primary" onclick="startCamera('environment')">Start Camera</button>
+        <button class="btn btn-secondary" onclick="startCamera('user')">Switch to Front</button>
+        <button class="btn btn-danger" onclick="stopCamera()">Stop Camera</button>
+      </div>
+      <div id="webcam-container"></div>
+    </div>
+
+    <div class="card">
+      <h2>🔍 Predictions</h2>
+      <div id="label-container"></div>
+    </div>
+
+    <div class="card">
+      <h2>📡 MQTT Control</h2>
+      <div class="flex">
+        <input id="broker-input" placeholder="Broker (e.g. ws://broker.hivemq.com:8000/mqtt)" style="flex:1; padding:6px;">
+        <input id="topic-input" placeholder="Topic (e.g. test/topic)" style="flex:1; padding:6px;">
+      </div>
+      <div class="flex" style="margin-top:10px;">
+        <button class="btn btn-primary" onclick="connectMQTT()">Connect</button>
+        <button class="btn btn-danger" onclick="disconnectMQTT()">Disconnect</button>
+      </div>
+      <p>Status: <span id="mqtt-status" class="status disconnected">Disconnected</span></p>
+      <p>Broker: <span id="mqtt-broker">-</span></p>
+      <p>Topic: <span id="mqtt-topic">-</span></p>
+      <p>Sent Messages: <span id="mqtt-count">0</span></p>
+    </div>
   </div>
 
-  <script type="text/javascript">
-    const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/"; // 👉 ใส่โมเดลของคุณ
-    let model, webcam, maxPredictions;
+<script>
+const MODEL_URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/";
+let model, webcam, maxPredictions;
+let client;
+let msgCount = 0;
+const THRESHOLD = 0.95;
+const IGNORE_CLASS = "None"; 
+let lastSentTime = 0;
+const SEND_INTERVAL = 5000; // 5 วิ
 
-    // MQTT setup
-    const mqttBroker = "wss://broker.hivemq.com:8884/mqtt"; 
-    const topic = "tm/cool"; 
-    const client = mqtt.connect(mqttBroker);
-    client.on("connect", () => {
-      document.getElementById("status").innerText = "MQTT: Connected ✅";
+async function startCamera(facingMode){
+  model = await tmImage.load(MODEL_URL+"model.json", MODEL_URL+"metadata.json");
+  maxPredictions = model.getTotalClasses();
+
+  webcam = new tmImage.Webcam(300,300,true);
+  await webcam.setup({facingMode});
+  await webcam.play();
+  document.getElementById("webcam-container").innerHTML="";
+  document.getElementById("webcam-container").appendChild(webcam.canvas);
+
+  window.requestAnimationFrame(loop);
+}
+
+function stopCamera(){
+  if(webcam){
+    let stream = webcam.webcam.srcObject;
+    stream.getTracks().forEach(track=>track.stop());
+    document.getElementById("webcam-container").innerHTML="";
+    document.getElementById("label-container").innerHTML="";
+    webcam = null;
+    lastSentTime = 0;
+  }
+}
+
+async function loop(){
+  webcam.update();
+  const prediction = await model.predict(webcam.canvas);
+  renderUI(prediction);
+
+  const topPrediction = prediction.reduce((a,b)=>a.probability>b.probability?a:b);
+
+  const now = Date.now();
+  if(topPrediction.className !== IGNORE_CLASS && 
+     topPrediction.probability >= THRESHOLD && 
+     client && client.connected) {
+    if(now - lastSentTime >= SEND_INTERVAL){ 
+      sendMQTT(topPrediction.className);
+      lastSentTime = now;
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+function renderUI(prediction){
+  const container = document.getElementById("label-container");
+  container.innerHTML="";
+  const topPrediction = prediction.reduce((a,b)=>a.probability>b.probability?a:b);
+  prediction.forEach(p=>{
+    const div = document.createElement("div");
+    div.className="class-box";
+    if(topPrediction.className === p.className) div.classList.add("active");
+    div.innerHTML=`<span>${p.className}</span><span>${(p.probability*100).toFixed(1)}%</span>
+      <div class="progress"><div class="progress-bar" style="width:${(p.probability*100).toFixed(1)}%"></div></div>`;
+    container.appendChild(div);
+  });
+}
+
+function connectMQTT(){
+  const broker = document.getElementById("broker-input").value;
+  const topic = document.getElementById("topic-input").value;
+  if(!broker||!topic){ alert("Enter Broker and Topic"); return; }
+  client = mqtt.connect(broker);
+
+  document.getElementById("mqtt-broker").innerText = broker;
+  document.getElementById("mqtt-topic").innerText = topic;
+
+  client.on("connect", ()=>{
+    document.getElementById("mqtt-status").innerText="Connected";
+    document.getElementById("mqtt-status").className="status connected";
+  });
+  client.on("error", err=>{
+    document.getElementById("mqtt-status").innerText="Error";
+    document.getElementById("mqtt-status").className="status disconnected";
+    console.error(err);
+  });
+  client.on("close", ()=>{
+    document.getElementById("mqtt-status").innerText="Disconnected";
+    document.getElementById("mqtt-status").className="status disconnected";
+  });
+}
+
+function disconnectMQTT(){
+  if(client){ client.end(); client=null;
+    document.getElementById("mqtt-status").innerText="Disconnected";
+    document.getElementById("mqtt-status").className="status disconnected";
+  }
+}
+
+function sendMQTT(className){
+  if(client && client.connected){
+    document.getElementById("mqtt-status").innerText="Sending...";
+    document.getElementById("mqtt-status").className="status sending";
+    client.publish(document.getElementById("mqtt-topic").innerText, className, {}, ()=>{
+      document.getElementById("mqtt-status").innerText="Connected";
+      document.getElementById("mqtt-status").className="status connected";
+      msgCount++;
+      document.getElementById("mqtt-count").innerText = msgCount;
     });
-
-    function sendMQTT(msg){
-      if(client.connected){
-        client.publish(topic, msg);
-        console.log("📤 Sent to MQTT:", msg);
-      }
-    }
-
-    // โหลดโมเดล
-    async function init() {
-      const modelURL = URL + "model.json";
-      const metadataURL = URL + "metadata.json";
-
-      model = await tmImage.load(modelURL, metadataURL);
-      maxPredictions = model.getTotalClasses();
-
-      // กล้อง
-      webcam = new tmImage.Webcam(300, 300, true);
-      await webcam.setup();
-      await webcam.play();
-      window.requestAnimationFrame(loop);
-
-      document.getElementById("webcam").srcObject = webcam.webcam.stream;
-    }
-
-    let lastSentTime = 0; 
-    const sendInterval = 5000; // 5 วิ
-
-    async function loop() {
-      webcam.update();
-      await predict();
-      window.requestAnimationFrame(loop);
-    }
-
-    async function predict() {
-      const prediction = await model.predict(webcam.canvas);
-
-      // หาค่าที่ความน่าจะเป็นสูงสุด
-      let topPrediction = prediction.reduce((max, p) => p.probability > max.probability ? p : max, prediction[0]);
-
-      // แสดงบน UI
-      document.getElementById("label-container").innerText = 
-        `${topPrediction.className} (${(topPrediction.probability*100).toFixed(1)}%)`;
-
-      // ส่ง MQTT ทุก 2 วิ ถ้าความแม่น >= 0.95
-      if(topPrediction.probability >= 0.95){
-        let now = Date.now();
-        if(now - lastSentTime > sendInterval){
-          sendMQTT(topPrediction.className);
-          lastSentTime = now;
-        }
-      }
-    }
-
-    init();
-  </script>
+  }
+}
+</script>
 </body>
 </html>
