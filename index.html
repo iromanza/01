@@ -17,13 +17,14 @@
 <body>
   <h2>🍌 Teachable Machine + MQTT 🍎</h2>
   <button onclick="init()">Start Camera & Model</button>
+  <button onclick="connectMQTT()">Connect MQTT</button>
   <div id="webcam-container"></div>
   <div id="label-container"></div>
   <div id="mqtt-status" class="status">MQTT: Not Connected</div>
   <pre id="log"></pre>
 
 <script>
-const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/"; 
+const URL = "https://teachablemachine.withgoogle.com/models/YOUR_MODEL_ID/"; 
 let model, webcam, labelContainer, maxPredictions;
 
 // MQTT settings
@@ -36,8 +37,12 @@ function logDebug(msg){
   document.getElementById("log").innerText += msg + "\n";
 }
 
-// ✅ connect MQTT
+// ✅ connect MQTT (กดปุ่มแล้วค่อยเชื่อม)
 function connectMQTT(){
+  if(client && client.connected){
+    logDebug("⚡ Already connected");
+    return;
+  }
   client = mqtt.connect(broker, { clientId });
   client.on("connect", ()=>{
     logDebug("✅ MQTT Connected to " + broker);
@@ -69,31 +74,27 @@ async function init() {
 
   document.getElementById("webcam-container").appendChild(webcam.canvas);
   labelContainer = document.getElementById("label-container");
-
-  connectMQTT();
 }
 
 async function loop() {
   webcam.update();
   const prediction = await model.predict(webcam.canvas);
 
-  // เลือกเฉพาะ class ที่ prob >= 0.8
-  let highProbClasses = prediction.filter(p => p.probability >= 0.8);
-  let payload = {};
+  // 🖥 แสดงทั้ง 3 class
   let displayText = "";
-
-  if(highProbClasses.length > 0){
-    let maxClass = highProbClasses.reduce((prev, curr) => 
-      (curr.probability > prev.probability ? curr : prev));
-    displayText = `${maxClass.className}: ${maxClass.probability.toFixed(2)}`;
-    payload[maxClass.className] = parseFloat(maxClass.probability.toFixed(2));
-  }
-
-  // แสดงผล
+  prediction.forEach(p=>{
+    displayText += `${p.className}: ${p.probability.toFixed(2)}\n`;
+  });
   labelContainer.innerText = displayText;
 
-  // ส่ง MQTT
-  if(Object.keys(payload).length > 0 && client && client.connected){
+  // 📡 ส่ง MQTT เฉพาะ class ที่ prob >= 0.9
+  let highProbClasses = prediction.filter(p => p.probability >= 0.9);
+  if(highProbClasses.length > 0 && client && client.connected){
+    let maxClass = highProbClasses.reduce((prev, curr) => 
+      (curr.probability > prev.probability ? curr : prev));
+    let payload = {};
+    payload[maxClass.className] = parseFloat(maxClass.probability.toFixed(2));
+
     document.getElementById("mqtt-status").innerText = "MQTT: Sending...";
     document.getElementById("mqtt-status").className = "status sending";
     client.publish(topic, JSON.stringify(payload), {}, ()=>{
