@@ -1,31 +1,110 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <title>Teachable Machine + MQTT</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    #webcam-container, #label-container { margin-top: 10px; }
+    .status { margin-top: 10px; font-weight: bold; }
+    .connected { color: green; }
+    .sending { color: orange; }
+    .error { color: red; }
+  </style>
 </head>
 <body>
-  <h3>MQTT Test</h3>
+  <h2>🍌 Teachable Machine + MQTT 🍎</h2>
+  <button onclick="init()">Start Camera & Model</button>
+  <div id="webcam-container"></div>
+  <div id="label-container"></div>
+  <div id="mqtt-status" class="status">MQTT: Not Connected</div>
   <pre id="log"></pre>
+
 <script>
-function log(msg){
+const URL = "https://teachablemachine.withgoogle.com/models/Z_7bvhRna/"; 
+let model, webcam, labelContainer, maxPredictions;
+
+// MQTT settings
+const broker = "wss://broker.hivemq.com:8884/mqtt";
+const topic = "tm/test";
+const clientId = "tm_client_" + Math.random().toString(16).substr(2,8);
+let client;
+
+function logDebug(msg){
   document.getElementById("log").innerText += msg + "\n";
 }
 
-const broker = "wss://broker.hivemq.com:8884/mqtt";
-const topic = "tm/test";
-const clientId = "test_" + Math.random().toString(16).substr(2,8);
+// ✅ connect MQTT
+function connectMQTT(){
+  client = mqtt.connect(broker, { clientId });
+  client.on("connect", ()=>{
+    logDebug("✅ MQTT Connected to " + broker);
+    document.getElementById("mqtt-status").innerText = "MQTT: Connected";
+    document.getElementById("mqtt-status").className = "status connected";
+    client.subscribe(topic);
+  });
+  client.on("message", (t, m)=> logDebug("📩 " + t + " => " + m.toString()));
+  client.on("error", err=>{
+    logDebug("❌ MQTT Error: " + err.message);
+    document.getElementById("mqtt-status").innerText = "MQTT: Error";
+    document.getElementById("mqtt-status").className = "status error";
+  });
+}
 
-const client = mqtt.connect(broker, { clientId });
+// ✅ init Teachable Machine
+async function init() {
+  const modelURL = URL + "model.json";
+  const metadataURL = URL + "metadata.json";
 
-client.on("connect", ()=>{
-  log("✅ Connected to " + broker);
-  client.subscribe(topic, ()=> log("Subscribed to " + topic));
-  client.publish(topic, "Hello from Browser");
-});
+  model = await tmImage.load(modelURL, metadataURL);
+  maxPredictions = model.getTotalClasses();
 
-client.on("message", (t, m)=> log("📩 " + t + " => " + m.toString()));
-client.on("error", err=> log("❌ Error: " + err.message));
-client.on("offline", ()=> log("⚠️ Offline"));
+  const flip = true;
+  webcam = new tmImage.Webcam(200, 200, flip);
+  await webcam.setup();
+  await webcam.play();
+  window.requestAnimationFrame(loop);
+
+  document.getElementById("webcam-container").appendChild(webcam.canvas);
+  labelContainer = document.getElementById("label-container");
+
+  connectMQTT();
+}
+
+async function loop() {
+  webcam.update();
+  const prediction = await model.predict(webcam.canvas);
+
+  // เลือกเฉพาะ class ที่ prob >= 0.8
+  let highProbClasses = prediction.filter(p => p.probability >= 0.8);
+  let payload = {};
+  let displayText = "";
+
+  if(highProbClasses.length > 0){
+    let maxClass = highProbClasses.reduce((prev, curr) => 
+      (curr.probability > prev.probability ? curr : prev));
+    displayText = `${maxClass.className}: ${maxClass.probability.toFixed(2)}`;
+    payload[maxClass.className] = parseFloat(maxClass.probability.toFixed(2));
+  }
+
+  // แสดงผล
+  labelContainer.innerText = displayText;
+
+  // ส่ง MQTT
+  if(Object.keys(payload).length > 0 && client && client.connected){
+    document.getElementById("mqtt-status").innerText = "MQTT: Sending...";
+    document.getElementById("mqtt-status").className = "status sending";
+    client.publish(topic, JSON.stringify(payload), {}, ()=>{
+      document.getElementById("mqtt-status").innerText = "MQTT: Connected";
+      document.getElementById("mqtt-status").className = "status connected";
+      logDebug("Sent MQTT: " + JSON.stringify(payload));
+    });
+  }
+
+  requestAnimationFrame(loop);
+}
 </script>
 </body>
 </html>
